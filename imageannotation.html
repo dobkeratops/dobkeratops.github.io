@@ -2,27 +2,45 @@
 <body>
 <style>body{overflow:hidden; width:100%;height:100%}</style>
 tool:
-<button id="point">point</button>
-<button id="line">line</button>
-<button id="rect">rect</button>
-<button id="poly">poly</button>
-<button id="move">move</button>
+<button id="point">(o)point</button>
+<button id="line">(l)line</button>
+<button id="rect">(r)rectangle</button>
+<button id="poly">(p)polygon</button>
+<button id="move">(m)move/split</button>
 <input id="currentLabel" value="person">current label</button>
 <input type="checkbox" id="showLabels" checked>showLabels</input>
 <input type="checkbox" id="showAllPolys" checked>showAllPolys</input>
-<div>(hotkeys: o l r p m; [ ] toggle preset labels;enter-rename; < > current poly)
+<div>(hotkeys: o l r p m; [ ] toggle preset labels;enter:rename; < > switch current poly)
 <canvas id="editor" width="1920" height="1080">
 </canvas>
 <script>
 
 editor=document.getElementById("editor");
-var g_presetLabels=["person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","lamppost","bin","window","door","object1","object2","object3"];
+var g_presetLabels=["person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
 var g_defaultColors={
-   "person":"#0000ff",
+   "person":"#1000f0",
+   "people":"#1000f0",
+   "man":"#0000ff",
+   "woman":"#2000f0",
    "vehicle":"#ff0000",
+   "car":"#ff0000",
+   "bus":"#ff0000",
+   "truck":"#ff0000",
+   "SUV":"#ff0000",
+   "suv":"#ff0000",
    "plant":"#00ff00",
+   "bush":"#00ff00",
+   "grass":"#00ff00",
+   "tree":"#00ff00",
    "animal":"#800080",
+   "dog":"#800080",
+   "horse":"#800080",
+   "cat":"#800080",
+   "cow":"#800080",
+   "sheep":"#800080",
    "building":"#c04000",
+   "house":"#c04000",
+   "barrier":"#c04000",
    "machine":"#008080",
 };
 function AddPoly(poly){ clr=g_defaultColors[poly.name]; if (clr){poly.color=clr;} else {poly.color="#008000"}; g_polys.push(poly); g_currentPoly=g_polys.length-1;}
@@ -316,6 +334,11 @@ function repaint() {
   firstpli=0; if (!g_showAllPolys){firstpli=g_polys.length-1; if (firstpli<0) firstpli=0;}
   for (pli=firstpli; pli<g_polys.length; pli++){
     pl=g_polys[pli];
+
+    // account for selection in rendering style.
+    currentPolyOutlineColor = (pli==g_currentPoly)?g_currentPolyOutline:pl.color;
+
+
     // fill the area
     context.globalAlpha=0.25;
     if (pl.points.length>2){
@@ -329,8 +352,8 @@ function repaint() {
       context.fill();
     }
 
-    context.strokeStyle=pl.color;
     context.globalAlpha=0.75;
+    context.fillStyle=currentPolyOutlineColor;
     if (g_showVertices){
       for (j=0; j<pl.points.length; j++) {
         fillCircle(context,pl.points[j].x,pl.points[j].y,g_snapRadius/2)
@@ -338,7 +361,7 @@ function repaint() {
     }
 
     // stroke the outline
-    context.strokeStyle = (pli==g_currentPoly)?g_currentPolyOutline:pl.color;
+    context.strokeStyle = currentPolyOutlineColor;
     context.globalAlpha=0.75;
     context.beginPath();
     context.moveTo(pl.points[pl.points.length-1].x,pl.points[pl.points.length-1].y);
@@ -535,6 +558,7 @@ g_moveTool={
   mousedown: function(e){
     pick=pickPolyFeatureAt(g_mousepos);
     if (pick.polyIndex>=0){
+      g_currentPoly=pick.polyIndex;
       g_adjustPoint=pick;
       if (pick.pointIndex>=0){
         console.log("move point..");
@@ -587,6 +611,10 @@ function RenamePoly(){
   currentPoly=g_polys[g_currentPoly];
   newname=prompt("enter new label",currentPoly.name);
   currentPoly.name=newname;
+  console.log(g_defaultColors[newname]);
+  if (g_defaultColors[newname]){
+    currentPoly.color=g_defaultColors[newname];
+  }
 }
 
 function DeleteCurrentPoly(){
