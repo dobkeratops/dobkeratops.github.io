@@ -30,6 +30,10 @@ var g_mouseDelta={};
 var g_showVertices=true;
 var g_labelColor="white"
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg"
+g_img.onload=function(){
+  g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
+  repaint();  
+}
 var g_width = editor.width;
 var g_height = editor.height;
 var g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
