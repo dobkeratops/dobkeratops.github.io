@@ -27,6 +27,7 @@ var g_defaultColors={
 };
 function AddPoly(poly){ clr=g_defaultColors[poly.name]; if (clr){poly.color=clr;} else {poly.color="#008000"}; g_polys.push(poly); g_currentPoly=g_polys.length-1;}
 var g_currentPoly=-1;
+var g_drawingPoly=[];
 var g_presetLabelIndex=0;
 var g_showLabelNames=true;
 var g_showAllPolys=true;
@@ -36,7 +37,6 @@ var g_mousepos={};
 var g_dragstart={};
 var g_drawfeedback=null;
 var g_polys=[];
-var g_currentPoly=[];
 var g_tool;
 var g_img = new window.Image();
 var g_mouseDelta={};
@@ -231,19 +231,19 @@ function pickPolyFeatureAt(cursorPt){
 }
 
 function drawFeedbackPoly(context){
-    if (g_currentPoly.length>0){
+    if (g_drawingPoly.length>0){
       context.globalAlpha=0.75;
       context.strokeStyle = "red";
       endpt=g_mousepos;
-      if (distSquared2d(g_currentPoly[0],g_mousepos)<g_snapRadius*g_snapRadius) {
-        endpt=g_currentPoly[0];
+      if (distSquared2d(g_drawingPoly[0],g_mousepos)<g_snapRadius*g_snapRadius) {
+        endpt=g_drawingPoly[0];
         context.strokeStyle = "green";
         context.globalAlpha=1.0;
       }
       context.beginPath();
-      context.moveTo(g_currentPoly[0].x,g_currentPoly[0].y);
-      for (i=1; i<g_currentPoly.length; i++){
-        context.lineTo(g_currentPoly[i].x,g_currentPoly[i].y);
+      context.moveTo(g_drawingPoly[0].x,g_drawingPoly[0].y);
+      for (i=1; i<g_drawingPoly.length; i++){
+        context.lineTo(g_drawingPoly[i].x,g_drawingPoly[i].y);
       }
       context.lineTo(endpt.x,endpt.y);
       context.stroke();
@@ -444,21 +444,21 @@ g_polyTool={
   mousedown: function(e){
       g_drawfeedback=drawFeedbackPoly;
       console.log("add poly point");
-      if (g_currentPoly.length>2){
-        if (distSquared2d(g_mousepos,g_currentPoly[0])<g_snapRadius*g_snapRadius){
+      if (g_drawingPoly.length>2){
+        if (distSquared2d(g_mousepos,g_drawingPoly[0])<g_snapRadius*g_snapRadius){
           console.log("finish poly");
-          AddPoly({points:g_currentPoly,name:getCurrentLabel()});
-          g_currentPoly=[];
+          AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+          g_drawingPoly=[];
           return;
         }
       }
-      g_currentPoly.push(g_mousepos);
+      g_drawingPoly.push(g_mousepos);
 
   },
   mouseup:function(e){
   },
   cancel:function(){
-     g_currentPoly=[];
+     g_drawingPoly=[];
   }
 };
 g_adjustPoint=null;
