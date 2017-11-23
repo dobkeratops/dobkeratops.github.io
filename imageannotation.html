@@ -1,45 +1,57 @@
 <html>
 <body>
 <style>body{overflow:hidden; width:100%;height:100%}</style>
+<div>
+<input id="imageurl" style="width:50pc" value="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg">imageURL</input>
+<div>
 tool:
 <button id="point">(o)point</button>
 <button id="line">(l)line</button>
 <button id="rect">(r)rectangle</button>
 <button id="poly">(p)polygon</button>
-<button id="move">(m)move/split</button>
-<input id="currentLabel" value="person">current label</button>
+<button id="edit">(e)edit</button>
+<input id="currentLabel" value="object">current label</button>
 <input type="checkbox" id="showLabels" checked>showLabels</input>
 <input type="checkbox" id="showAllPolys" checked>showAllPolys</input>
-<div>(hotkeys: o l r p m; [ ] toggle preset labels;enter:rename; < > switch current poly)
+<button id="load">load</button>
+<button id="save">save</button>
+<button id="help">help</button>
+
+<div id="presetArea">
 <canvas id="editor" width="1920" height="1080">
 </canvas>
 <script>
 
+document.getElementById("help").onclick=function(){alert(
+"hotkeys:\no\tpoint tool\nl\tline tool\nr\trect tool\np\tpoint tool\ne\tedit tool\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
+"\nload/save just accepts or presents current annotation data in JSON format,\nit's a placeholder until this is integrated");};
+
+
 editor=document.getElementById("editor");
-var g_presetLabels=["person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
+imageurl=document.getElementById("imageurl");
+var g_presetLabels=["object","person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
+
+labelEdit=document.getElementById("currentLabel");
+//? only got dropdown, not combo boxes?
+//throw the presets into the dropdown..
+//for (i=0; i<g_presetLabels; i++) {
+//
+//}
+
 var g_defaultColors={
-   "person":"#1000f0",
-   "people":"#1000f0",
-   "man":"#0000ff",
-   "woman":"#2000f0",
-   "vehicle":"#ff0000",
-   "car":"#ff0000",
-   "bus":"#ff0000",
-   "truck":"#ff0000",
-   "SUV":"#ff0000",
-   "suv":"#ff0000",
-   "plant":"#00ff00",
-   "bush":"#00ff00",
-   "grass":"#00ff00",
+   "person":"#1000f0", "people":"#1000f0", 
+   "man":"#0000ff",    "woman":"#2000f0",
+   "vehicle":"#ff0000", "car":"#ff0000",
+   "bus":"#ff0000",     "truck":"#ff0000",
+   "SUV":"#ff0000",     "suv":"#ff0000",
+   "plant":"#00ff00",   "bush":"#00ff00",
+   "vegetation":"#00ff00", "grass":"#00ff00",
    "tree":"#00ff00",
-   "animal":"#800080",
-   "dog":"#800080",
-   "horse":"#800080",
-   "cat":"#800080",
-   "cow":"#800080",
-   "sheep":"#800080",
-   "building":"#c04000",
-   "house":"#c04000",
+   "animal":"#800080",   "dog":"#800080",
+   "horse":"#800080",    "cat":"#800080",
+   "cow":"#800080",      "sheep":"#800080",
+   "livestock":"#800080","cattle":"#800080",
+   "building":"#c04000", "house":"#c04000",
    "barrier":"#c04000",
    "machine":"#008080",
 };
@@ -60,14 +72,77 @@ var g_img = new window.Image();
 var g_mouseDelta={};
 var g_showVertices=true;
 var g_labelColor="white"
-g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg"
+g_img.src=imageurl.value;//
+g_img.ready=false;
+
 g_img.onload=function(){
   g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
+  this.ready=true;
   repaint();  
 }
+
+function LoadImage(url){
+  //TODO: means of using pre-specified scaled sizes.
+  g_img.ready=false;
+  g_img.src=url;
+}
+
+document.getElementById("imageurl").oninput=function(){
+  if (g_polys.length) {
+    if (!confirm("changing URL will lose current polys:"+g_polys.length)){
+      document.getElementById("imageurl")=g_img.src;
+      return;
+    }
+  }
+  LoadImage(document.getElementById("imageurl").value);
+  g_polys=[];
+  
+}
+
 var g_width = editor.width;
 var g_height = editor.height;
 var g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
+
+function lerp(a,b,f){
+   return (b-a)*f+a;
+}
+function polyDiagonalHexFromRect(rc) {
+  var width = Math.abs(rc.end.x-rc.start.x);
+  var height = Math.abs(rc.end.y-rc.start.y);
+  x0 = rc.start.x;
+  y0 = rc.start.y;
+  x1 = rc.end.x;
+  y1 = rc.end.y;
+  fx=0.75; fy=0.125; // trim a little from the diagonal
+  fyy=0.035;
+
+  if (width > height) { // wider than tall - split horiz
+     return {
+      points:[
+        {x:x0, y:lerp(y0,y1,fyy)},
+        {x:lerp(x0,x1,fx),       y:y0},
+        {x:x1,   y:lerp(y0,y1,fy)},
+        {x:x1,   y:lerp(y1,y0,fyy)},
+        {x:lerp(x1,x0,fx),       y:y1},
+        {x:x0,   y:lerp(y1,y0,fy)}
+      ],
+      name:rc.name
+     };
+  } else {
+     midy=(rc.start.y+rc.end.y)*0.5;
+     return {
+      points:[
+        {x:lerp(x0,x1,fyy),     y:y0},
+        {x:lerp(x1,x0,fy),     y:y0},
+        {x:x1,     y:lerp(y0,y1,fy)},
+        {x:lerp(x1,x0,fyy),     y:y1},
+        {x:lerp(x0,x1,fy),  y:y1},
+        {x:x0,      y:lerp(y1,y0,fy)}
+      ],
+      name:rc.name
+    };
+  }
+}
 
 function polyFromRect(rc) {
   return {
@@ -80,6 +155,29 @@ function polyFromRect(rc) {
     name:rc.name
   };
 }
+
+function polyOctFromRect(rc) {
+  x0 = rc.start.x;
+  y0 = rc.start.y;
+  x1 = rc.end.x;
+  y1 = rc.end.y;
+  t=0.1; // trim a little from the corners
+
+  return {
+    points:[
+      {x:lerp(x0,x1,t),  y:y0},
+      {x:lerp(x1,x0,t),  y:y0},
+      {x:x1,  y:lerp(y0,y1,t)},
+      {x:x1,  y:lerp(y1,y0,t)},
+      {x:lerp(x1,x0,t),  y:y1},
+      {x:lerp(x0,x1,t),  y:y1},
+      {x:x0,  y:lerp(y1,y0,t)},
+      {x:x0,  y:lerp(y0,y1,t)},
+    ],
+    name:rc.name
+  };
+}
+
 function averagePoint(a,b){
   return {x:(a.x+b.x)/2, y:(a.y+b.y)/2}
 }
@@ -199,11 +297,17 @@ function pickOrMakePoint(cursorPt){
   return newpl.points[0];
 }
 
+function IsVisible(pli){
+   if (g_showAllPolys){return true;}
+   return pli==g_currentPoly;
+}
+
 function pickPolyFeatureAt(cursorPt){
   picked={pointIndex:-1,polyIndex:-1,edgeIndex:-1,edgeFraction:0.0,point:{}};
   minDist2=10000*10000;
 
   for (pli=0; pli<g_polys.length; pli++) {
+    if (!IsVisible(pli)){continue;}
     pl=g_polys[pli];
 
     // pick the polygon centre?
@@ -312,6 +416,8 @@ function drawCrosshair(context,cursor,size){
 }
 
 function repaint() {
+  if (!g_img.ready) return;
+  if (g_currentPoly>g_polys.length){currentPoly=-1;}
   g_showLabelNames=document.getElementById("showLabels").checked;
   g_showAllPolys=document.getElementById("showAllPolys").checked;  
   console.log(document.getElementById("showLabels").checked);
@@ -327,12 +433,21 @@ function repaint() {
   context.fillStyle = "green";
 
   context.strokeStyle="#00ff00";
-  context.font = "20px Arial";
-
+  var textHeight;
+  if (g_polys.length<8){
+    textHeight=20.0;
+    context.font = "20px Arial";
+  } else if(g_polys.length<16){
+    textHeight=15.0;
+    context.font = "15px Arial";
+  }else{
+    textHeight=10.0;
+    context.font = "10px Arial";
+  }
 
   // Show polys
-  firstpli=0; if (!g_showAllPolys){firstpli=g_polys.length-1; if (firstpli<0) firstpli=0;}
-  for (pli=firstpli; pli<g_polys.length; pli++){
+  for (pli=0; pli<g_polys.length; pli++){
+    if (!IsVisible(pli)) continue;
     pl=g_polys[pli];
 
     // account for selection in rendering style.
@@ -374,11 +489,11 @@ function repaint() {
     pos=polyCentre(pl.points);
     if (g_showLabelNames){
       var textWidth = context.measureText(pl.name).width;
-      var textHeight=20.0;
-      
-      context.globalAlpha=(pli==g_currentPoly)?0.5:0.25;
-      context.fillStyle = "black";
-      context.fillRect(pos.x-textWidth/2,pos.y-textHeight/2, textWidth, textHeight);
+   
+// text label black background
+//       context.globalAlpha=(pli==g_currentPoly)?0.5:0.25;
+//      context.fillStyle = "black";
+//      context.fillRect(pos.x-textWidth/2,pos.y-textHeight/2, textWidth, textHeight);
       context.globalAlpha=(pli==g_currentPoly)?1.0:0.75;
       context.fillStyle = g_labelColor;
       context.fillText(pl.name,pos.x-textWidth/2,pos.y+textHeight/2);
@@ -413,24 +528,34 @@ function ToggleCurrentPoly(dir){
   repaint();
 }
 
-g_rectTool={
-  activate: function(e){
-     g_drawfeedback=dragFeedbackCrosshairFull;
-  },
-  mousedown: function(e){
+
+// rectangular-drag creation tools -
+// several variations for different actual shapes
+
+function makeRectToolVariant(polyCreateFn){
+  return{
+    activate: function(e){
+       g_drawfeedback=dragFeedbackCrosshairFull;
+    },
+    mousedown: function(e){
       g_drawfeedback=dragFeedbackRect;
-  },
-  mousemove: function(e){
-  },
-  mouseup:function(e){
-      newrect={start:g_dragstart,end:g_mousepos,name: getCurrentLabel()};
+    },
+    mousemove: function(e){
+    },
+    mouseup:function(e){
+        newrect={start:g_dragstart,end:g_mousepos,name: getCurrentLabel()};
     
-      if (distSquared2d(g_dragstart,g_mousepos)>0){
-        AddPoly(polyFromRect(newrect));
-      }
-      g_drawfeedback=dragFeedbackCrosshairFull;
+        if (distSquared2d(g_dragstart,g_mousepos)>0){
+          AddPoly(polyCreateFn(newrect));
+        }
+        g_drawfeedback=dragFeedbackCrosshairFull;
+    }
   }
-};
+}
+
+g_hexTool=makeRectToolVariant(polyDiagonalHexFromRect);
+g_octTool=makeRectToolVariant(polyOctFromRect);
+g_rectTool=makeRectToolVariant(polyFromRect);
 
 g_lineTool={
   name:"draw edges",
@@ -575,7 +700,7 @@ g_moveTool={
   }
 };
 
-g_tool=g_rectTool;
+g_tool=g_hexTool;
 
 function SetTool(tool){
   if (g_tool){
@@ -593,8 +718,38 @@ function SetTool(tool){
 document.getElementById("poly").onclick=function(){SetTool(g_polyTool);};
 document.getElementById("line").onclick=function(){SetTool(g_lineTool);};
 document.getElementById("point").onclick=function(){SetTool(g_pointTool);};
-document.getElementById("rect").onclick=function(){SetTool(g_rectTool);};
-document.getElementById("move").onclick=function(){SetTool(g_moveTool);};
+document.getElementById("rect").onclick=function(){SetTool(g_hexTool);};
+document.getElementById("edit").onclick=function(){SetTool(g_moveTool);};
+
+// JSON dump. TODO - connect to a server etc etc
+
+function GetAsJSON(){
+  return JSON.stringify(
+   { imageurl:      g_img.src,//document.getElementById("imageurl").value,
+     scaled_width:  g_scaled_w,
+     scaled_height: g_scaled_h,
+     polygons:      g_polys
+   });
+}
+
+document.getElementById("save").onclick=function(){
+   alert(GetAsJSON());
+};
+
+document.getElementById("load").onclick=function(){
+   var txt=prompt("enter JSON annotations");
+   if (!txt){return;}
+   
+   // grab the stuff.
+   var inputJSON=JSON.parse(txt);
+   console.log("loading: "+inputJSON.imageurl);
+//   LoadImage(inputJSON.imageurl); // doesnt work.. 
+   // todo- how to safely set UI etc
+   g_img.src=inputJSON.imageurl;
+   document.getElementById("imageurl").value;
+   console.log("setting new polys,num= "+inputJSON.polygons.length);
+   g_polys=inputJSON.polygons;
+};
 
 function readMousePos(e){
   var edrect = editor.getBoundingClientRect();
@@ -632,8 +787,9 @@ window.addEventListener('keydown',  function(e){
   kc=e.keyCode;
   console.log("keypress:"+kc);
   // todo - programatic, show hotkeys.
-  if (kc==82){SetTool(g_rectTool)} 
-  else if (kc==77){SetTool(g_moveTool)}
+  if (kc==82){SetTool(g_hexTool)} 
+  if (kc==66){SetTool(g_octTool)} 
+  else if (kc==69){SetTool(g_moveTool)}
   else if (kc==80){SetTool(g_polyTool)}
   else if (kc==79){SetTool(g_pointTool)}
   else if (kc==76){SetTool(g_lineTool)}
@@ -648,6 +804,24 @@ window.addEventListener('keydown',  function(e){
   readMousePos(e);repaint();
 },false);
 
+repaint();
+
+var example1Labels=
+[{"points":[{"x":805,"y":406.94},{"x":768,"y":403},{"x":699.75,"y":411},{"x":671,"y":432},{"x":627,"y":442.5},{"x":627,"y":468.06},{"x":634,"y":489},{"x":660,"y":491},{"x":670,"y":478},{"x":684,"y":490},{"x":700.25,"y":492},{"x":728,"y":489},{"x":752,"y":486},{"x":757,"y":475},{"x":776,"y":476},{"x":785,"y":489},{"x":807,"y":485.5},{"x":810,"y":467},{"x":825,"y":464},{"x":825,"y":438}],"name":"suv","color":"#ff0000"},{"points":[{"x":316.155,"y":393},{"x":323.875,"y":392},{"x":337,"y":406.75},{"x":339,"y":433},{"x":332,"y":448},{"x":333.845,"y":478},{"x":320.125,"y":478},{"x":316,"y":453},{"x":314,"y":426.25},{"x":308,"y":420},{"x":315,"y":405}],"name":"man","color":"#0000ff"},{"points":[{"x":282.09,"y":386},{"x":272.25,"y":380},{"x":265,"y":395},{"x":261,"y":406.25},{"x":262,"y":431},{"x":259.91,"y":455},{"x":276.75,"y":455},{"x":274,"y":443},{"x":278,"y":415.75},{"x":287,"y":411},{"x":288,"y":404},{"x":278,"y":404},{"x":278,"y":396}],"name":"man","color":"#0000ff"},{"points":[{"x":249,"y":446.815},{"x":222,"y":443},{"x":171,"y":420},{"x":107,"y":421},{"x":67,"y":427},{"x":11,"y":453},{"x":1,"y":451.625},{"x":2,"y":527.185},{"x":32,"y":528},{"x":48,"y":517},{"x":172,"y":513},{"x":181,"y":522},{"x":211,"y":520},{"x":222,"y":506},{"x":249,"y":501.375},{"x":254,"y":468}],"name":"sedan","color":"#008000"},{"points":[{"x":942,"y":407.73},{"x":897,"y":405},{"x":853.25,"y":411},{"x":831,"y":429.75},{"x":816,"y":436},{"x":814,"y":462.27},{"x":823,"y":483},{"x":865.75,"y":486},{"x":890,"y":482},{"x":899,"y":470},{"x":924,"y":470},{"x":932,"y":478},{"x":951,"y":475.25},{"x":962,"y":460},{"x":960,"y":427}],"name":"suv","color":"#ff0000"},{"points":[{"x":1019.97,"y":410},{"x":971.25,"y":410},{"x":964,"y":417.625},{"x":965.03,"y":470},{"x":1014.75,"y":471},{"x":1022,"y":463.375}],"name":"sedan","color":"#008000"},{"points":[{"x":423.98,"y":388},{"x":447.5,"y":388},{"x":451,"y":397.25},{"x":450.02,"y":462},{"x":426.5,"y":462},{"x":423,"y":452.75}],"name":"man","color":"#0000ff"},{"points":[{"x":423.16,"y":391},{"x":403,"y":391},{"x":400,"y":399.75},{"x":400.84,"y":461},{"x":421,"y":461},{"x":424,"y":452.25}],"name":"woman","color":"#2000f0"},{"points":[{"x":591,"y":378.395},{"x":569,"y":362},{"x":539.5,"y":356},{"x":502,"y":365.125},{"x":478,"y":390},{"x":477,"y":435},{"x":502,"y":456.605},{"x":532,"y":448},{"x":593.5,"y":452},{"x":606,"y":428.875},{"x":605,"y":397}],"name":"bush","color":"#00ff00"},{"points":[{"x":701,"y":238.915},{"x":685,"y":244},{"x":672.25,"y":236},{"x":659,"y":249},{"x":651,"y":240},{"x":636,"y":254},{"x":618,"y":248},{"x":611,"y":259},{"x":589,"y":250.125},{"x":565,"y":279},{"x":564,"y":297},{"x":549,"y":312},{"x":562,"y":325},{"x":555,"y":335},{"x":554,"y":348},{"x":565,"y":350},{"x":578,"y":358},{"x":593,"y":378.085},{"x":619,"y":387},{"x":638,"y":396},{"x":638,"y":439},{"x":650,"y":436},{"x":649,"y":399},{"x":657.75,"y":399},{"x":690,"y":387},{"x":713,"y":387.875},{"x":726,"y":393},{"x":747,"y":371},{"x":739,"y":361},{"x":748,"y":350},{"x":746,"y":337},{"x":722,"y":325},{"x":724,"y":313},{"x":732,"y":299},{"x":734,"y":282},{"x":704,"y":286},{"x":712,"y":280},{"x":696,"y":270},{"x":695,"y":259},{"x":708,"y":256}],"name":"tree","color":"#00ff00"}]
+
+var example2Labels=[{"points":[{"x":665,"y":474.625},{"x":611,"y":459},{"x":577.75,"y":460},{"x":554,"y":473},{"x":515,"y":485.375},{"x":516,"y":505.375},{"x":527,"y":512},{"x":572.25,"y":514},{"x":659,"y":515.625},{"x":672,"y":492}],"name":"convertible car","color":"#ff0000"},{"points":[{"x":675,"y":469.96},{"x":717,"y":451},{"x":757.25,"y":451},{"x":760,"y":466},{"x":755,"y":477.04},{"x":728.75,"y":480},{"x":724,"y":508},{"x":693,"y":509},{"x":674,"y":498}],"name":"sedan","color":"#008000"},{"points":[{"x":833.62,"y":481},{"x":774.5,"y":481},{"x":771,"y":508.625},{"x":770.38,"y":546},{"x":827.5,"y":546},{"x":832,"y":539.375},{"x":834,"y":507}],"name":"roadworks","color":"#008000"},{"points":[{"x":635.145,"y":219},{"x":628,"y":202},{"x":590.625,"y":204},{"x":589,"y":222.625},{"x":585.855,"y":308},{"x":619.375,"y":308},{"x":628,"y":286},{"x":632,"y":269.375}],"name":"chimney","color":"#008000"},{"points":[{"x":221,"y":470.065},{"x":252,"y":458},{"x":266,"y":463},{"x":269,"y":472},{"x":284,"y":468},{"x":304,"y":459},{"x":320,"y":463},{"x":329,"y":456},{"x":341,"y":465},{"x":357.75,"y":454},{"x":366,"y":460},{"x":384,"y":459},{"x":400,"y":471},{"x":406,"y":490.375},{"x":404,"y":504.935},{"x":351,"y":505},{"x":298,"y":507},{"x":262.25,"y":506},{"x":223,"y":502.625}],"name":"bush","color":"#00ff00"},{"points":[{"x":212,"y":190.72},{"x":231,"y":210},{"x":241.5,"y":237},{"x":240,"y":244},{"x":259,"y":258},{"x":257,"y":247},{"x":281,"y":231},{"x":295,"y":242},{"x":314,"y":234},{"x":331,"y":244},{"x":338,"y":264},{"x":356,"y":268},{"x":363,"y":286},{"x":370,"y":262},{"x":381,"y":245},{"x":395,"y":270},{"x":412,"y":281},{"x":391,"y":283},{"x":334,"y":373.28},{"x":262,"y":375},{"x":234,"y":395},{"x":222.5,"y":393},{"x":223,"y":326},{"x":231,"y":315},{"x":187,"y":260},{"x":188,"y":260},{"x":188,"y":249},{"x":204,"y":245},{"x":210,"y":230},{"x":205,"y":215},{"x":206,"y":195}],"name":"trees","color":"#00ff00"},{"points":[{"x":469,"y":447.12},{"x":482,"y":451},{"x":490,"y":460},{"x":496,"y":449},{"x":504,"y":448},{"x":509.75,"y":447},{"x":522,"y":459},{"x":526,"y":464.88},{"x":504,"y":472},{"x":486,"y":466},{"x":480.25,"y":479},{"x":457,"y":470},{"x":459,"y":459}],"name":"people","color":"#1000f0"},{"points":[{"x":655.44,"y":435},{"x":642,"y":435},{"x":640,"y":439},{"x":640.56,"y":467},{"x":654,"y":467},{"x":656,"y":463}],"name":"man","color":"#0000ff"},{"points":[{"x":608.735,"y":445},{"x":626.375,"y":445},{"x":629,"y":448.25},{"x":628.265,"y":471},{"x":610.625,"y":471},{"x":608,"y":467.75}],"name":"man","color":"#0000ff"},{"points":[{"x":78,"y":510.075},{"x":73,"y":475},{"x":76,"y":452},{"x":84,"y":441},{"x":78,"y":433},{"x":60,"y":444},{"x":50,"y":428},{"x":45,"y":416},{"x":0,"y":410.125},{"x":1,"y":589.925},{"x":50,"y":588},{"x":55,"y":580},{"x":78,"y":580},{"x":119,"y":563.875},{"x":143,"y":537},{"x":115,"y":520}],"name":"bush","color":"#00ff00"},{"points":[{"x":1.3650000000000002,"y":224},{"x":74,"y":235},{"x":76,"y":224},{"x":94,"y":220},{"x":117,"y":224},{"x":116,"y":239},{"x":153,"y":241},{"x":153,"y":212},{"x":171,"y":208},{"x":192.125,"y":212},{"x":189,"y":261.125},{"x":229,"y":314},{"x":223,"y":327},{"x":223,"y":393},{"x":233,"y":412},{"x":231,"y":421},{"x":224,"y":428},{"x":223.635,"y":509},{"x":78.875,"y":510},{"x":70,"y":473},{"x":86,"y":437},{"x":79,"y":432},{"x":61,"y":441},{"x":44,"y":415},{"x":-1,"y":408.875}],"name":"house","color":"#c04000"},{"points":[{"x":88,"y":511.42999999999995},{"x":349,"y":511},{"x":513,"y":500},{"x":530,"y":518},{"x":473,"y":518},{"x":452,"y":522},{"x":449,"y":532},{"x":475,"y":540},{"x":521,"y":544},{"x":619,"y":553},{"x":726,"y":558},{"x":883,"y":563},{"x":1024,"y":563.25},{"x":1026,"y":661.57},{"x":414,"y":662},{"x":218,"y":661.75},{"x":287,"y":634},{"x":300,"y":617},{"x":285,"y":593},{"x":251,"y":576},{"x":191,"y":565},{"x":142,"y":558},{"x":146,"y":537},{"x":115,"y":518}],"name":"road","color":"#008000"},{"points":[{"x":251,"y":576.08},{"x":191,"y":566},{"x":137.5,"y":558},{"x":137,"y":576},{"x":168,"y":585},{"x":156,"y":613},{"x":129,"y":627},{"x":4,"y":660.92},{"x":208.5,"y":662},{"x":287,"y":633},{"x":298,"y":617},{"x":286,"y":592}],"name":"pavement","color":"#008000"},{"points":[{"x":653,"y":516.61},{"x":722,"y":517},{"x":731,"y":522},{"x":779.25,"y":527},{"x":843,"y":534},{"x":986,"y":533},{"x":1023,"y":528.75},{"x":1020,"y":558.39},{"x":883,"y":560},{"x":699.75,"y":554},{"x":524,"y":543},{"x":455,"y":534.25},{"x":453,"y":523},{"x":473,"y":518}],"name":"pavement","color":"#008000"},{"points":[{"x":922.32,"y":163},{"x":936,"y":177},{"x":944,"y":167},{"x":953,"y":171},{"x":970,"y":178},{"x":976,"y":194},{"x":1000,"y":200},{"x":994,"y":222},{"x":1014,"y":202},{"x":1024,"y":210.625},{"x":1022,"y":422},{"x":981.68,"y":418},{"x":983,"y":364},{"x":1001,"y":351},{"x":966,"y":317},{"x":927,"y":282},{"x":923,"y":249},{"x":875,"y":239.375},{"x":873,"y":221},{"x":888,"y":217},{"x":885,"y":205},{"x":892,"y":192},{"x":901,"y":193}],"name":"trees","color":"#008000"},{"points":[{"x":748,"y":259.68},{"x":636,"y":269},{"x":635,"y":220},{"x":628,"y":201},{"x":588,"y":202},{"x":583,"y":272},{"x":393.75,"y":281},{"x":336,"y":374},{"x":261,"y":373},{"x":225,"y":396.32},{"x":224,"y":450},{"x":270,"y":453},{"x":289,"y":470},{"x":311,"y":458},{"x":330,"y":453},{"x":356,"y":454},{"x":387,"y":457},{"x":407,"y":461},{"x":409,"y":470},{"x":418,"y":461},{"x":420,"y":488},{"x":428,"y":487},{"x":427,"y":462},{"x":439,"y":443},{"x":454,"y":467},{"x":467,"y":447},{"x":518,"y":445},{"x":539,"y":464},{"x":566,"y":455},{"x":608.25,"y":460},{"x":695,"y":458},{"x":716,"y":450},{"x":755,"y":451},{"x":756,"y":366},{"x":736,"y":356},{"x":768,"y":322}],"name":"pub","color":"#008000"},{"points":[{"x":509,"y":245.205},{"x":523,"y":231},{"x":532,"y":234},{"x":540.75,"y":220},{"x":564,"y":227},{"x":572,"y":223},{"x":585,"y":230.875},{"x":585,"y":274.795},{"x":521.25,"y":278},{"x":492,"y":276},{"x":491,"y":269.125},{"x":512,"y":257}],"name":"tree","color":"#00ff00"},{"points":[{"x":678,"y":242.12},{"x":666,"y":241},{"x":645.75,"y":236},{"x":632,"y":241},{"x":632,"y":267.88},{"x":679.25,"y":269},{"x":695,"y":265},{"x":691,"y":252}],"name":"trees","color":"#008000"},{"points":[{"x":-1,"y":590.135},{"x":50,"y":589},{"x":52,"y":578},{"x":138,"y":578},{"x":166,"y":584.625},{"x":157,"y":613},{"x":131,"y":624},{"x":96,"y":642.865},{"x":-1,"y":660},{"x":2,"y":639.375}],"name":"grass","color":"#00ff00"},{"points":[{"x":833,"y":499.435},{"x":859,"y":501},{"x":968,"y":499},{"x":1004,"y":496},{"x":1024,"y":508.125},{"x":1026,"y":527},{"x":986,"y":532.565},{"x":851,"y":534},{"x":829,"y":532.875}],"name":"steps","color":"#008000"},{"points":[{"x":657,"y":453.945},{"x":687,"y":453},{"x":707,"y":456.375},{"x":696,"y":469.055},{"x":672,"y":476},{"x":672,"y":483},{"x":667,"y":473},{"x":651,"y":468.625}],"name":"bush","color":"#00ff00"},{"points":[{"x":801,"y":290.155},{"x":782,"y":296},{"x":758,"y":290.125},{"x":764,"y":309.845},{"x":764,"y":325},{"x":778,"y":311.875}],"name":"tree","color":"#00ff00"},{"points":[{"x":813,"y":257.835},{"x":834,"y":253},{"x":857,"y":238},{"x":863.25,"y":213},{"x":884,"y":240},{"x":922,"y":249.125},{"x":929,"y":284},{"x":998,"y":357.165},{"x":860.75,"y":358},{"x":731,"y":359},{"x":807,"y":284.875}],"name":"roof","color":"#008000"},{"points":[{"x":729,"y":481.19},{"x":756,"y":483},{"x":766,"y":484.25},{"x":766,"y":511},{"x":761,"y":514},{"x":762,"y":542.81},{"x":753,"y":545},{"x":753,"y":514},{"x":736,"y":515},{"x":734,"y":545},{"x":727,"y":545},{"x":727,"y":511},{"x":725,"y":509.75}],"name":"placename","color":"#008000"},{"points":[{"x":566,"y":423.015},{"x":607.75,"y":406},{"x":657,"y":427},{"x":639,"y":432.625},{"x":614,"y":433.985},{"x":589.25,"y":434},{"x":566,"y":429.375}],"name":"umbrella","color":"#008000"},{"points":[{"x":535,"y":420.945},{"x":490,"y":405},{"x":442,"y":424.375},{"x":465,"y":428.055},{"x":487,"y":429},{"x":512,"y":427.625}],"name":"umbrella","color":"#008000"},{"points":[{"x":357,"y":425.945},{"x":313.75,"y":408},{"x":285,"y":421.375},{"x":287,"y":426},{"x":284,"y":429.055},{"x":301.25,"y":429},{"x":329,"y":425.625}],"name":"umbrella","color":"#008000"},{"points":[{"x":227,"y":419.98},{"x":252.5,"y":409},{"x":293,"y":427.5},{"x":266,"y":432.02},{"x":242.5,"y":433},{"x":223,"y":433.5}],"name":"umbrella","color":"#008000"},{"points":[{"x":437,"y":453.575},{"x":449,"y":463},{"x":471,"y":458},{"x":485,"y":464},{"x":497,"y":458},{"x":505,"y":467},{"x":528,"y":460},{"x":543,"y":462},{"x":552,"y":452},{"x":579,"y":458.625},{"x":552,"y":476},{"x":521,"y":483},{"x":515,"y":495.425},{"x":464,"y":495},{"x":427,"y":489.375},{"x":426,"y":474}],"name":"bush","color":"#00ff00"},{"points":[{"x":223,"y":448.945},{"x":257,"y":448},{"x":280,"y":456.375},{"x":294,"y":470.055},{"x":276,"y":465},{"x":265,"y":469},{"x":255,"y":458},{"x":236,"y":457},{"x":226,"y":474},{"x":223,"y":471.625}],"name":"car","color":"#ff0000"},{"points":[{"x":341,"y":450.805},{"x":320,"y":455},{"x":306,"y":456},{"x":305.75,"y":447},{"x":297,"y":448.875},{"x":286,"y":459},{"x":286,"y":469.195},{"x":311.25,"y":461},{"x":346,"y":463.125}],"name":"people","color":"#1000f0"},{"points":[{"x":769,"y":611},{"x":707,"y":601},{"x":946,"y":564},{"x":1023,"y":566},{"x":1022,"y":573}],"name":"give way (road marking)","color":"#008000"},{"points":[{"x":522,"y":572}],"name":"","color":"#008000"},{"points":[{"x":522,"y":572},{"x":769,"y":611}],"name":"road centreline","color":"#008000"},{"points":[{"x":1,"y":-0.9950000000000045},{"x":615.5,"y":-1},{"x":1027,"y":-0.125},{"x":1025,"y":210.995},{"x":1011,"y":208},{"x":1003,"y":215},{"x":993,"y":221},{"x":994,"y":216},{"x":1002,"y":206},{"x":990,"y":198},{"x":984,"y":192},{"x":969,"y":191},{"x":965,"y":180},{"x":962,"y":172},{"x":938,"y":174},{"x":933,"y":167},{"x":923,"y":163},{"x":906,"y":180},{"x":901,"y":192},{"x":882,"y":194},{"x":873,"y":204},{"x":872,"y":215},{"x":878,"y":224},{"x":894,"y":224},{"x":888,"y":210},{"x":898,"y":185},{"x":883,"y":187},{"x":874,"y":185},{"x":871,"y":164},{"x":869,"y":137},{"x":864,"y":163},{"x":861,"y":185},{"x":850,"y":188},{"x":845,"y":185},{"x":835,"y":185},{"x":831,"y":190},{"x":834,"y":197},{"x":845,"y":197},{"x":854,"y":194},{"x":862,"y":205},{"x":864,"y":211},{"x":860,"y":239},{"x":814,"y":257},{"x":794,"y":296},{"x":771,"y":294},{"x":755,"y":282},{"x":749,"y":260},{"x":696,"y":263},{"x":679,"y":245},{"x":638,"y":235},{"x":626,"y":204},{"x":610,"y":199},{"x":591,"y":207},{"x":585,"y":232},{"x":545,"y":222},{"x":515,"y":240},{"x":514,"y":255},{"x":501,"y":265},{"x":496,"y":279},{"x":408.5,"y":281},{"x":398,"y":273},{"x":393,"y":261},{"x":378,"y":248},{"x":377,"y":260},{"x":373,"y":266},{"x":365,"y":284},{"x":357,"y":282},{"x":356,"y":268},{"x":336,"y":266},{"x":332,"y":248},{"x":322,"y":243},{"x":320,"y":233},{"x":295,"y":241},{"x":290,"y":232},{"x":280,"y":234},{"x":271,"y":241},{"x":262,"y":242},{"x":255,"y":246},{"x":261,"y":257},{"x":249,"y":256},{"x":238,"y":244},{"x":245,"y":233},{"x":236,"y":225},{"x":231,"y":211},{"x":223,"y":205},{"x":215,"y":194},{"x":206,"y":195},{"x":210,"y":207},{"x":205,"y":214},{"x":209,"y":232},{"x":204,"y":247},{"x":189,"y":251},{"x":189,"y":231},{"x":190,"y":211},{"x":171,"y":207},{"x":149,"y":214},{"x":157,"y":220},{"x":155,"y":244},{"x":112,"y":242},{"x":115,"y":225},{"x":90,"y":219},{"x":73,"y":225},{"x":76,"y":235},{"x":0,"y":227.125}],"name":"sky","color":"#008000"},{"points":[{"x":-1,"y":224.925},{"x":154.5,"y":242},{"x":170,"y":265},{"x":187,"y":262.875},{"x":231,"y":317.075},{"x":64.5,"y":304},{"x":0,"y":300.125}],"name":"roof","color":"#008000"},{"points":[{"x":392,"y":282.835},{"x":587.5,"y":274},{"x":586,"y":309},{"x":620,"y":310},{"x":635,"y":269},{"x":747,"y":261.125},{"x":714,"y":363.165},{"x":521,"y":367},{"x":538,"y":387},{"x":576,"y":415},{"x":562,"y":422},{"x":537,"y":424},{"x":488.5,"y":406},{"x":442,"y":426},{"x":361,"y":424},{"x":313,"y":408},{"x":286,"y":425},{"x":251,"y":409},{"x":229,"y":420},{"x":264,"y":376},{"x":333,"y":373.875}],"name":"roof","color":"#008000"}];
+
+var fullExample={"imageurl":"https://upload.wikimedia.org/wikipedia/commons/9/96/Sakeham_Farm_10.jpg",
+"scaled_width":1024,"scaled_height":768,"polygons":[{"points":[{"x":311,"y":107.255},{"x":336,"y":106},{"x":340,"y":132},{"x":338,"y":160},{"x":439,"y":160},{"x":442,"y":157},{"x":459,"y":155},{"x":459,"y":148},{"x":468,"y":147},{"x":469,"y":156},{"x":480,"y":162},{"x":618.25,"y":167},{"x":615,"y":173},{"x":657,"y":202.625},{"x":664,"y":238},{"x":659,"y":243},{"x":658,"y":261},{"x":660,"y":277},{"x":702,"y":319},{"x":705,"y":392.745},{"x":411,"y":396},{"x":307.75,"y":399},{"x":247,"y":393.375},{"x":248,"y":260},{"x":238,"y":259},{"x":242,"y":228},{"x":290,"y":183},{"x":293,"y":159},{"x":309,"y":158}],"name":"house","color":"#c04000"},{"points":[{"x":33,"y":342.675},{"x":61,"y":332},{"x":84,"y":319},{"x":138,"y":311},{"x":168,"y":324},{"x":180,"y":351.125},{"x":215,"y":366},{"x":218,"y":399},{"x":200,"y":402.325},{"x":71,"y":406},{"x":28,"y":392.875}],"name":"bush","color":"#00ff00"},{"points":[{"x":3,"y":450.115},{"x":237,"y":452},{"x":389.25,"y":447},{"x":478,"y":448.125},{"x":506,"y":458},{"x":518,"y":477},{"x":412,"y":492},{"x":399,"y":505},{"x":330,"y":514.885},{"x":234,"y":520},{"x":147.75,"y":517},{"x":3,"y":524.875}],"name":"frosted grass","color":"#008000"},{"points":[{"x":404,"y":400.89},{"x":540,"y":395},{"x":748.5,"y":399},{"x":876,"y":404},{"x":1024,"y":407.75},{"x":1024,"y":447.11},{"x":907,"y":450},{"x":763,"y":457},{"x":558.5,"y":453},{"x":378,"y":443.25},{"x":418,"y":423}],"name":"grass","color":"#00ff00"},{"points":[{"x":38.760000000000005,"y":251},{"x":24,"y":253},{"x":23,"y":240},{"x":29,"y":242},{"x":31,"y":234},{"x":7,"y":231},{"x":14,"y":238},{"x":12,"y":252},{"x":-1,"y":250.625},{"x":-2.76,"y":321},{"x":22,"y":316},{"x":40,"y":339},{"x":114,"y":309},{"x":97,"y":300},{"x":67,"y":301.375},{"x":36,"y":265}],"name":"house","color":"#c04000"},{"points":[{"x":655,"y":3.645000000000003},{"x":871.5,"y":2},{"x":1024,"y":-1.125},{"x":1025,"y":357.355},{"x":989,"y":360},{"x":1004,"y":409},{"x":952,"y":405},{"x":955,"y":362},{"x":947,"y":357},{"x":936,"y":364},{"x":945,"y":421},{"x":935,"y":421},{"x":923,"y":373},{"x":893,"y":360},{"x":874,"y":347},{"x":849,"y":370},{"x":815,"y":400},{"x":768,"y":394},{"x":717.5,"y":370},{"x":689,"y":361},{"x":694,"y":302},{"x":714,"y":276},{"x":693,"y":265},{"x":689,"y":237},{"x":708,"y":220},{"x":733,"y":213},{"x":765,"y":222},{"x":755,"y":258},{"x":790,"y":244},{"x":762,"y":208},{"x":774,"y":189},{"x":750,"y":175},{"x":773,"y":157},{"x":685,"y":213.125},{"x":661,"y":155},{"x":613,"y":140},{"x":605,"y":88},{"x":652,"y":80},{"x":668,"y":89},{"x":665,"y":76},{"x":648,"y":34}],"name":"trees","color":"#00ff00"},{"points":[{"x":331.975,"y":373},{"x":361.375,"y":356},{"x":394,"y":370.75},{"x":406.025,"y":413},{"x":403,"y":432},{"x":373,"y":446},{"x":335.625,"y":444},{"x":325,"y":432.25},{"x":317,"y":400}],"name":"bush","color":"#00ff00"},{"points":[{"x":1,"y":525.95},{"x":146,"y":518},{"x":329,"y":515},{"x":400,"y":503},{"x":411,"y":493},{"x":434,"y":485},{"x":465,"y":485},{"x":510,"y":478},{"x":512,"y":469},{"x":505,"y":456},{"x":509,"y":450},{"x":558,"y":454},{"x":760.5,"y":458},{"x":908,"y":452},{"x":1025,"y":449.25},{"x":1022,"y":663.05},{"x":270.5,"y":662},{"x":0,"y":662.75}],"name":"river","color":"#008000"}]};
+
+var examples=[
+  {imageurl:"https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg",
+  labels:example1Labels},
+  {imageurl:"https://upload.wikimedia.org/wikipedia/commons/0/0a/Ickenham_-_water_pump%2C_pub%2C_and_houses_-_geograph.org.uk_-_20123.jpg",
+  labels:example2Labels}
+];
+
+g_polys=example1Labels;
 repaint();
 
 </script>
