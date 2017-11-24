@@ -2,8 +2,6 @@
 <body>
 <style>body{overflow:hidden; width:100%;height:100%}</style>
 <div>
-<input id="imageurl" style="width:50pc" value="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg">imageURL</input>
-<div>
 tool:
 <button id="point">(o)point</button>
 <button id="line">(l)line</button>
@@ -13,6 +11,7 @@ tool:
 <input id="currentLabel" value="object">current label</button>
 <input type="checkbox" id="showLabels" checked>showLabels</input>
 <input type="checkbox" id="showAllPolys" checked>showAllPolys</input>
+<button id="newImage">new image</button>
 <button id="load">load</button>
 <button id="save">save</button>
 <button id="help">help</button>
@@ -24,11 +23,26 @@ tool:
 
 document.getElementById("help").onclick=function(){alert(
 "hotkeys:\no\tpoint tool\nl\tline tool\nr\trect tool\np\tpoint tool\ne\tedit tool\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
-"\nload/save just accepts or presents current annotation data in JSON format,\nit's a placeholder until this is integrated");};
-
+"save\tdownloads current annotations as JSON\n"+
+"drag-drop JSON file to load image & annotations\n");
+};
+document.getElementById("newImage").onclick=function(){
+/* confirm overwrite.. shouldn't need when web based.
+  if (g_polys.length) {
+    if (!confirm("changing URL will lose current polys:"+g_polys.length)){
+      return;
+    }
+  }
+*/
+  url=prompt("enter image URL");
+  if (!url){return;}
+  
+  LoadImage(url);
+  g_polys=[];
+  repaint();
+}
 
 editor=document.getElementById("editor");
-imageurl=document.getElementById("imageurl");
 var g_presetLabels=["object","person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
 
 labelEdit=document.getElementById("currentLabel");
@@ -72,10 +86,12 @@ var g_img = new window.Image();
 var g_mouseDelta={};
 var g_showVertices=true;
 var g_labelColor="white"
-g_img.src=imageurl.value;//
+// default image to load..
+g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
 
 g_img.onload=function(){
+  console.log("image.onload");
   g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
   this.ready=true;
   repaint();  
@@ -85,18 +101,15 @@ function LoadImage(url){
   //TODO: means of using pre-specified scaled sizes.
   g_img.ready=false;
   g_img.src=url;
+  console.log("image.src="+url);
 }
 
-document.getElementById("imageurl").oninput=function(){
-  if (g_polys.length) {
-    if (!confirm("changing URL will lose current polys:"+g_polys.length)){
-      document.getElementById("imageurl")=g_img.src;
-      return;
-    }
-  }
-  LoadImage(document.getElementById("imageurl").value);
-  g_polys=[];
-  
+urlgadget=document.getElementById("imageurl");
+if (urlgadget){
+  urlgadget.oninput=function(){
+    LoadImage(document.getElementById("imageurl").value);
+    g_polys=[];
+  } 
 }
 
 var g_width = editor.width;
@@ -416,13 +429,19 @@ function drawCrosshair(context,cursor,size){
 }
 
 function repaint() {
-  if (!g_img.ready) return;
+  var canvas = document.querySelector("canvas");
+  var context = canvas.getContext("2d");
+  if (!g_img.ready) {
+    
+    context.font = "20px Arial";
+    context.fillText("loading\n"+g_img.src,0,0);
+
+    return;
+  }
   if (g_currentPoly>g_polys.length){currentPoly=-1;}
   g_showLabelNames=document.getElementById("showLabels").checked;
   g_showAllPolys=document.getElementById("showAllPolys").checked;  
   console.log(document.getElementById("showLabels").checked);
-  var canvas = document.querySelector("canvas");
-  var context = canvas.getContext("2d");
  
   context.globalAlpha=1.0;
   img=g_img;
@@ -634,6 +653,7 @@ g_moveTool={
   },
   mousemove: function(e){
     if (g_adjustPoint){
+      //can only adjust current poly
 
       // edge split operation?
       if (g_adjustPoint.edgeIndex>=0){
@@ -641,7 +661,7 @@ g_moveTool={
         pl=g_polys[g_adjustPoint.polyIndex];
         pti1=(g_adjustPoint.edgeIndex+1)%pl.points.length;
         newPt=averagePoint(pl.points[g_adjustPoint.edgeIndex],pl.points[pti1]);
-        newPt=g_mousepos;
+        //newPt=g_mousepos;
 
         // 2 types of edgeplit, if the poly is just an edge, make 2 polys with new vertex
         // else split in the boundary
@@ -664,7 +684,6 @@ g_moveTool={
         }
 
       }
-
 
       pl=g_polys[g_adjustPoint.polyIndex];
       if (g_adjustPoint.pointIndex>=0 ){
@@ -723,6 +742,19 @@ document.getElementById("edit").onclick=function(){SetTool(g_moveTool);};
 
 // JSON dump. TODO - connect to a server etc etc
 
+function download(filename, text) {
+  var element = document.createElement('a');
+  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+  element.setAttribute('download', filename);
+
+  element.style.display = 'none';
+  document.body.appendChild(element);
+
+  element.click();
+
+  document.body.removeChild(element);
+}
+
 function GetAsJSON(){
   return JSON.stringify(
    { imageurl:      g_img.src,//document.getElementById("imageurl").value,
@@ -731,24 +763,67 @@ function GetAsJSON(){
      polygons:      g_polys
    });
 }
+var g_downloadIndex=0;
+
+// load the scene from a text file
+function loadFromText(txt){
+   var inputJSON=JSON.parse(txt);
+   if (!inputJSON){
+     alert("must load JSON format");
+     return;
+   }
+   if (!inputJSON.imageurl && inputJSON.polygons){
+     alert("incorret format, needs imageurl,polygons");
+     return;
+   }
+
+   alert("Loading annotations for:"+inputJSON.imageurl);
+//   LoadImage(inputJSON.imageurl); // doesnt work.. 
+   // todo- how to safely set UI etc
+   g_img.src=inputJSON.imageurl;
+//   document.getElementById("imageurl").value;
+   console.log("setting new polys,num= "+inputJSON.polygons.length);
+   g_polys=inputJSON.polygons;
+}
 
 document.getElementById("save").onclick=function(){
-   alert(GetAsJSON());
+   filename=prompt("download as","annotations"+g_downloadIndex+".json"); g_downloadIndex+=1;
+//   alert(GetAsJSON());
+   download(filename,GetAsJSON());
 };
+
+// drag drop the annotation file in for load.
+editor.ondragover=function(ev){
+  console.log("dragover");
+  ev.preventDefault();
+}
+editor.ondrop=function(ev){
+  console.log("got a drop");
+  ev.preventDefault();
+  var dt=ev.dataTransfer;
+  var files = ev.target.files || ev.dataTransfer.files;
+
+  for (var i=0,file; file=files[i];i++){
+    console.log("got file drop:"+file+" l="+file.length); 
+    reader = new FileReader();
+    reader.onload = function(event) {
+        console.log("file loaded:"+event.target);
+        data = event.target.result;
+        console.log("file loaded bytes="+data.length);
+        loadFromText(data);        
+    };
+    reader.readAsText(file);
+
+  }
+}
+
 
 document.getElementById("load").onclick=function(){
    var txt=prompt("enter JSON annotations");
    if (!txt){return;}
    
    // grab the stuff.
-   var inputJSON=JSON.parse(txt);
-   console.log("loading: "+inputJSON.imageurl);
-//   LoadImage(inputJSON.imageurl); // doesnt work.. 
-   // todo- how to safely set UI etc
-   g_img.src=inputJSON.imageurl;
-   document.getElementById("imageurl").value;
-   console.log("setting new polys,num= "+inputJSON.polygons.length);
-   g_polys=inputJSON.polygons;
+   loadFromText(txt);
 };
 
 function readMousePos(e){
@@ -818,7 +893,8 @@ var examples=[
   {imageurl:"https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg",
   labels:example1Labels},
   {imageurl:"https://upload.wikimedia.org/wikipedia/commons/0/0a/Ickenham_-_water_pump%2C_pub%2C_and_houses_-_geograph.org.uk_-_20123.jpg",
-  labels:example2Labels}
+  labels:example2Labels},
+{"imageurl":"https://upload.wikimedia.org/wikipedia/commons/5/5f/Vendeur_de_parapluie.jpg","scaled_width":1024,"scaled_height":768,"polygons":[{"points":[{"x":641.2,"y":133},{"x":631,"y":123},{"x":616,"y":118},{"x":602,"y":119},{"x":592,"y":124},{"x":589,"y":137},{"x":573,"y":144.375},{"x":577,"y":153},{"x":592,"y":154},{"x":595,"y":170},{"x":579,"y":243},{"x":563,"y":281},{"x":586,"y":308},{"x":590,"y":340},{"x":592,"y":388},{"x":576,"y":397},{"x":575.8,"y":407},{"x":593,"y":420},{"x":627,"y":417},{"x":633,"y":370},{"x":629,"y":333},{"x":636,"y":306.625},{"x":644,"y":276},{"x":648,"y":255},{"x":655,"y":200},{"x":638,"y":169},{"x":630,"y":151},{"x":640,"y":148}],"name":"person","color":"#1000f0"},{"points":[{"x":454.655,"y":155},{"x":461,"y":137},{"x":479,"y":129},{"x":506,"y":151},{"x":540.375,"y":153},{"x":583,"y":210.5},{"x":576,"y":293},{"x":571,"y":335},{"x":558.345,"y":388},{"x":533,"y":380},{"x":540,"y":363},{"x":506,"y":370},{"x":495.625,"y":364},{"x":523,"y":344},{"x":524,"y":308.5},{"x":493,"y":273},{"x":497,"y":237},{"x":485,"y":186},{"x":463,"y":175}],"name":"person","color":"#1000f0"},{"points":[{"x":659,"y":205.215},{"x":667,"y":190},{"x":679,"y":185},{"x":689,"y":187},{"x":685,"y":175},{"x":693,"y":164},{"x":720,"y":171},{"x":713,"y":197},{"x":743,"y":200},{"x":748.75,"y":193},{"x":814,"y":185.625},{"x":814,"y":207},{"x":797,"y":208},{"x":800,"y":197},{"x":776,"y":202},{"x":772,"y":209},{"x":777,"y":222},{"x":796,"y":228},{"x":812,"y":250},{"x":819,"y":284},{"x":810,"y":311.785},{"x":799,"y":323},{"x":777,"y":326},{"x":750,"y":307},{"x":740,"y":273},{"x":731,"y":269},{"x":723,"y":279},{"x":709,"y":276},{"x":702,"y":289},{"x":687.25,"y":292},{"x":670,"y":285},{"x":659,"y":269.375},{"x":652,"y":238}],"name":"bicycle","color":"#008000"},{"points":[{"x":357,"y":244.605},{"x":378,"y":238},{"x":387,"y":236},{"x":398.75,"y":236},{"x":459,"y":256},{"x":483,"y":278},{"x":504,"y":285.875},{"x":515,"y":332.395},{"x":479,"y":330},{"x":430,"y":306},{"x":404.25,"y":344},{"x":401,"y":341.125},{"x":423,"y":302},{"x":403,"y":289},{"x":375,"y":268}],"name":"umbrella","color":"#008000"},{"points":[{"x":894.06,"y":82},{"x":886,"y":71},{"x":873.5,"y":73},{"x":867,"y":85},{"x":872,"y":99},{"x":868,"y":117.75},{"x":861,"y":128},{"x":840,"y":124},{"x":850,"y":138},{"x":865,"y":148},{"x":869,"y":176},{"x":860,"y":190},{"x":869,"y":191},{"x":879.94,"y":189},{"x":891,"y":182},{"x":886,"y":172},{"x":883.5,"y":153},{"x":903,"y":160.25},{"x":914,"y":145},{"x":913,"y":122},{"x":906,"y":104},{"x":893,"y":94}],"name":"person","color":"#1000f0"},{"points":[{"x":868.62,"y":112},{"x":854,"y":86},{"x":851,"y":76},{"x":841,"y":68},{"x":829,"y":75},{"x":825.5,"y":83},{"x":829,"y":100},{"x":825,"y":109},{"x":815,"y":123},{"x":803,"y":130.125},{"x":812,"y":137},{"x":812,"y":151},{"x":810,"y":163},{"x":795,"y":171},{"x":798.38,"y":180},{"x":818,"y":173},{"x":819,"y":181},{"x":835.5,"y":177},{"x":842,"y":154.875},{"x":842,"y":137},{"x":864,"y":122}],"name":"person","color":"#1000f0"},{"points":[{"x":383.165,"y":83},{"x":364,"y":75},{"x":358.125,"y":60},{"x":333,"y":79.875},{"x":347,"y":93},{"x":340,"y":105},{"x":339,"y":121},{"x":329,"y":128},{"x":332,"y":141},{"x":342,"y":156},{"x":342.835,"y":196},{"x":358,"y":243},{"x":376,"y":239},{"x":377,"y":209},{"x":388.875,"y":238},{"x":410,"y":237.125},{"x":395,"y":181},{"x":407,"y":137},{"x":397,"y":93}],"name":"person","color":"#1000f0"},{"points":[{"x":167.17,"y":79},{"x":191.25,"y":78},{"x":188,"y":97},{"x":195,"y":108.625},{"x":198,"y":137},{"x":212,"y":168},{"x":206.83,"y":176},{"x":173.75,"y":169},{"x":164,"y":157},{"x":155,"y":160},{"x":149,"y":136.375},{"x":150,"y":103},{"x":166,"y":93}],"name":"person","color":"#1000f0"},{"points":[{"x":899,"y":259.76},{"x":927,"y":255},{"x":954,"y":263},{"x":943,"y":224},{"x":991,"y":228},{"x":985,"y":278},{"x":1005,"y":278},{"x":1024,"y":281},{"x":1024,"y":343.24},{"x":998,"y":358},{"x":989,"y":378},{"x":975,"y":379},{"x":971,"y":389},{"x":968,"y":410},{"x":955,"y":413},{"x":935,"y":386},{"x":905,"y":377},{"x":883,"y":348},{"x":878,"y":312}],"name":"bicycle","color":"#008000"},{"points":[{"x":907,"y":209.715},{"x":932.25,"y":207},{"x":955,"y":213.125},{"x":948,"y":232},{"x":952,"y":256.285},{"x":910.75,"y":255},{"x":893,"y":245.875},{"x":894,"y":226}],"name":"food basket","color":"#008000"},{"points":[{"x":67.83500000000001,"y":225},{"x":87,"y":212},{"x":116,"y":217},{"x":109,"y":250},{"x":121,"y":247},{"x":133,"y":231},{"x":153,"y":231},{"x":180,"y":240},{"x":154,"y":268},{"x":193,"y":257},{"x":211,"y":244},{"x":228.875,"y":236},{"x":230,"y":250},{"x":191,"y":278},{"x":242,"y":338},{"x":240,"y":368},{"x":202,"y":402},{"x":295,"y":367},{"x":299,"y":372.375},{"x":285,"y":391},{"x":248,"y":409},{"x":217,"y":417},{"x":239,"y":447},{"x":271,"y":500},{"x":334.165,"y":661},{"x":216.125,"y":663},{"x":189,"y":613},{"x":167,"y":558},{"x":155,"y":501},{"x":144,"y":455},{"x":118,"y":476},{"x":114,"y":465},{"x":88,"y":474.625},{"x":86,"y":464},{"x":131,"y":438},{"x":130,"y":416},{"x":119,"y":400},{"x":76,"y":407},{"x":74,"y":401},{"x":34,"y":408},{"x":29,"y":392},{"x":84,"y":389},{"x":115,"y":376},{"x":110,"y":359},{"x":92,"y":313},{"x":45,"y":320},{"x":42,"y":306},{"x":75,"y":292},{"x":67,"y":270},{"x":73,"y":250}],"name":"parked bicycles","color":"#008000"}]}
 ];
 
 g_polys=example1Labels;
