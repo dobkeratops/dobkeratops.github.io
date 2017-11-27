@@ -1,0 +1,24 @@
+body{ 
+    font: 12px arial, sans-serif;
+    foreground-color:#808080;
+   background-color: #c0c0c0;
+//cursor:url(crosshair),default;
+
+}
+
+.button {
+    background-color: #e0e0e0; /* Green */
+  border: 0 none;
+  border-radius: 4px;
+
+    color: #808080;
+    padding: 4px 2px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 12px;
+    opacity: .9;
+    transition: opacity 300ms linear;
+
+
+}
