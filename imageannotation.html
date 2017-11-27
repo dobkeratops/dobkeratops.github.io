@@ -17,7 +17,7 @@ tool:
 <button class="button" id="load">load</button>
 <button class="button" id="save">save</button>
 <button class="button" id="help">help</button>
-<button class="button" id="prefs">prefs</button>
+<button class="button" id="info">info</button>
 
 <div id="presetArea">
 <canvas id="editor" width="1920" height="1080">
@@ -39,11 +39,32 @@ document.getElementById("help").onclick=function(){alert(
 "m\tMerge tagged vertices\n"+
 "shift-s\tseperate merged vertices\n"+
 "e\textrude tagged edges/polys\n"+
+"ctrl-p\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
 "'tag' here means 'selected'\n"
 )
 };
-document.getElementById("prefs").onclick=function(){
-   if (g_labelColor=="white") { g_labelColor="black";} else {g_labelColor="white";}
+//document.getElementById("prefs").onclick=function(){
+//   if (g_labelColor=="white") { g_labelColor="black";} else {g_labelColor="white";}
+//}
+document.getElementById("info").onclick=function(){
+	console.log("show info");
+	var info="";
+	
+	var visit=function(pls,depth){
+		for (var i=0; i<pls.length; i++){
+			pl=pls[i];
+			var txt="";
+			for (var j=0; j<depth; j++){txt+="\t";}
+			txt+=pl.name;txt+="\t("+pl.points.length+" vertices)";
+			txt+="\n";
+			info+=txt;
+			if (pl.polygons){
+				visit(pl.polygons,depth+1);
+			}
+		}
+	};
+	visit(g_polys,0);
+	alert(info);
 }
 document.getElementById("newImage").onclick=function(){
 /* confirm overwrite.. shouldn't need when web based.
@@ -96,6 +117,7 @@ function AddPoly(poly){ clr=g_defaultColors[poly.name]; if (clr){poly.color=clr;
 var g_currPoly=null;
 var g_drawingPoly=[];
 var g_presetLabelIndex=0;
+var g_cursorTxt=0;
 var g_showLabelNames=true;
 var g_showAllPolys=true;
 var g_currentPolyOutline="#ffffff";
@@ -661,6 +683,15 @@ function repaint() {
   if (g_drawfeedback){
     g_drawfeedback(context);
   }
+  if (g_cursorTxt){
+	 context.globalAlpha=0.5;
+	  context.fillStyle = "white";
+    context.font = "15px Arial";
+        context.textAlign="left";
+        context.fillText(g_cursorTxt, g_mousepos.x,g_mousepos.y+30);
+	
+	g_cursorTxt=null;
+  }
 
   drawStatusInfo(context);
 }
@@ -845,6 +876,9 @@ function dumpHrc(pls,indent){
 g_parentTool={
 	name:"set object parents (pick parts)",
 	activate: function(e){ g_drawfeedback=drawFeedbackPickPolyPoint; g_currPoly=0;},
+	mousepassivemove:function(e){
+		g_cursorTxt = !g_currPoly?"pick parent":"pick part of "+g_currPoly.name
+	},
 	mouseclickup:function(e){
 		console.log("change hrc: before:- "+g_polys.length);
 		dumpHrc(g_polys,0);
