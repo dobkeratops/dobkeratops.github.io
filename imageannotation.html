@@ -178,8 +178,8 @@ function vaxisy(){return {x:0,y:1,z:0}}
 function vaxisz(){return {x:0,y:0,z:1}}
 function vone(){return {x:1,y:1,z:1}}
 function vsplat(s){return {x:x,y:s,z:s}}
-function vmax(a,b){return {x:Math.max(a.x,b.x),y:Math.max(a.y,b.y),y:Math.max(a.z,b.z)}}
-function vmin(a,b){return {x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),z:Math.max(a.z,b.z)}}
+function vmax(a,b){return {x:Math.max(a.x,b.x), y:Math.max(a.y,b.y), z:Math.max(a.z,b.z)}}
+function vmin(a,b){return {x:Math.min(a.x,b.x), y:Math.min(a.y,b.y), z:Math.min(a.z,b.z)}}
 
 function vmadd(a,b,f){
 	return {x:a.x+b.x*f, y:a.y+b.y*f, z:a.z+b.z*f}
@@ -755,7 +755,7 @@ function drawPolygons(context,polys,parent,sel){
     context.globalAlpha=0.75;
     context.beginPath();
 
-    context.moveTo(pl.points[pl.points.length-1].x,pl.points[pl.points.length-1].y);
+    vmoveto(context,pl.points[pl.points.length-1]);
     if (pl.points.length==1){ // it's a single-point crosshair
       
       context.moveTo(pos.x-g_snapRadius*2,pos.y);
@@ -766,7 +766,7 @@ function drawPolygons(context,polys,parent,sel){
       context.stroke();
     }
     else for (var j=0; j<pl.points.length; j++) { // it's a prpper poly.
-      context.lineTo(pl.points[j].x,pl.points[j].y);
+      vlineto(context,pl.points[j]);
     }
    
     context.stroke();
@@ -1100,9 +1100,9 @@ function foreachVertex(f){
 	foreachVertexSub(g_polys,f);
 }
 
-function foreachVertexOfPolygonSub(f){
-	for (var i=0; i<g_polys.length;i++){
-		var pl=g_polys[i];
+function foreachVertexOfPolygonSub(polys,f){
+	for (var i=0; i<polys.length;i++){
+		var pl=polys[i];
 		for (var j=0; j<pl.points.length; j++){
 			f(pl.points[j],pl);
 		}
@@ -1116,9 +1116,9 @@ function foreachVertexOfPolygon(f){
 	foreachVertexOfPolygonSub(g_polys,f);
 }
 
-function foreachEdgeOfPolygonSub(f){
-	for (var i=0; i<g_polys.length;i++){
-		var pl=g_polys[i];
+function foreachEdgeOfPolygonSub(polys,f){
+	for (var i=0; i<polys.length;i++){
+		var pl=polys[i];
 		for (var j=0; j<pl.points.length; j++){
 			f(pl.points[j],pl.points[(j+1)%pl.points.length],pl);
 		}
@@ -1128,6 +1128,7 @@ function foreachEdgeOfPolygonSub(f){
 function foreachEdgeOfPolygon(f){
 	foreachEdgeOfPolygonSub(g_polys,f);
 }
+
 
 function extrudeTaggedVertices(){
 	console.log("extrude");
@@ -1140,7 +1141,7 @@ function extrudeTaggedVertices(){
 			var va=pl.points[j];
 			var vb=pl.points[(j+1)%pl.points.length];
 			if (va.tag && vb.tag){
-				var edge=[va,vb];
+				var edge={start:va, end:vb, poly:pl};
 				extrudeEdges.push(edge);
 				exvs.set(va,true);
 				exvs.set(vb,true);
@@ -1168,7 +1169,8 @@ function extrudeTaggedVertices(){
 	for (var i=0; i<extrudeEdges.length; i++){
 		var e=extrudeEdges[i];
 		console.log("extruded edge:"+JSON.stringify(e));
-		newpoly=makeQuad(e[0],extrudedv.get(e[0]),extrudedv.get(e[1]),e[1],"");
+		newpoly=makeQuad(e.start,extrudedv.get(e.start),extrudedv.get(e.end),e.end,e.poly?e.poly.name:"");
+		newpoly.color = e.poly?e.poly.color:0x808080;
 		AddPoly(newpoly);
 	}
 	console.log("extrude edges "+ extrudeEdges.length +" vertices="+extrudedv.length);
@@ -1190,7 +1192,7 @@ g_extrudeTool={
 	},
 	mousepassivemove: function(e){
 		vtc=GetSelectedVertices();
-		console.log("selvtc len=",vtc.length);
+		console.log("selvtc len=",vtc.length+"mousedelta="+JSON.stringify(g_mouseDelta));
 		vtc.forEach(function(val,keypt,map){
 			
 			vaddto(keypt,g_mouseDelta);
@@ -1214,12 +1216,11 @@ function multiSelectMouseUp(e){
 	console.log("multi select mouse up\n");
 	var selectedVertices=new Map();
 	foreachVertex(function(v){selectedVertices.set(v,true);});
-	minx=Math.min(g_dragstart.x,g_mousepos.x);
-	maxx=Math.max(g_dragstart.x,g_mousepos.x);
-	miny=Math.min(g_dragstart.y,g_mousepos.y);
-	maxy=Math.max(g_dragstart.y,g_mousepos.y);
+	pmin=vmin(g_dragstart,g_mousepos);
+	pmax=vmax(g_dragstart,g_mousepos);
+	console.log("bounds:"+JSON.stringify([pmin,pmax]));
 	selectedVertices.forEach(function(val,vt,map){
-		if (inrange(vt.x, minx,maxx) && inrange(vt.y,miny,maxy)){
+		if (inrange(vt.x, pmin.x,pmax.x) && inrange(vt.y,pmin.y,pmax.y)){
 			vt.tag=vt.tag?false:true
 		}
 	});
@@ -1332,7 +1333,6 @@ g_adjustTool={
  	var pt=pickPointAt(g_mousepos);
 	if (!pt){
 		g_hackMoveTaggedVertices=false;
-	    console.log("move point.. pick="+JSON.stringify(pick));
 		if (pick.selPoint){
 			pt=pick.selPoint;
 		}
