@@ -162,7 +162,7 @@ function vmin(a,b){return {x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),z:Math.max(a.
 function vmadd(a,b,f){
 	return {x:a.x+b.x*f, y:a.y+b.y*f, z:a.z+b.z*f}
 }
-function vscale(a,f){return {x:a.x*f, y:a.y*f z:a.z*f}};
+function vscale(a,f){return {x:a.x*f, y:a.y*f, z:a.z*f}};
 function vmulElem(a,b){return {x:a.x*b.x, y:a.y*b.y, z:a.z*b.z}};
 function vdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 function sqr(x){return x*x;}
@@ -233,24 +233,25 @@ function polyDiagonalHexFromRect(rc) {
 }
 
 function polyFromRect(rc) {
+	var z=0;
   return {
     points:[
-      vfromxy(rc.start.x, rc.start.y),
-      vfromxy(rc.end.x,   rc.start.y),
-      vfromxy(rc.end.x,   rc.end.y),
-      vfromxy(rc.start.x, rc.end.y)
+      vfromxyz(rc.start.x, rc.start.y ,z),
+      vfromxyz(rc.end.x,   rc.start.y ,z),
+      vfromxyz(rc.end.x,   rc.end.y ,z),
+      vfromxyz(rc.start.x, rc.end.y ,z)
     ],
     name:rc.name
   };
 }
 
 function polyOctFromRect(rc) {
-  x0 = rc.start.x;
-  y0 = rc.start.y;
-  x1 = rc.end.x;
-  y1 = rc.end.y;
-  t=0.1; // trim a little from the corners
-  z=0;
+  var x0 = rc.start.x;
+  var y0 = rc.start.y;
+  var x1 = rc.end.x;
+  var y1 = rc.end.y;
+  var t=0.1; // trim a little from the corners
+  var z=0;
   return {
     points:[
       vfromxyz(lerp(x0,x1,t),  y0,z),
@@ -267,15 +268,15 @@ function polyOctFromRect(rc) {
 }
 
 function distSquared2d(a,b){
-   dx=b.x-a.x; dy=b.y-a.y; return dx*dx+dy*dy;
+   var dx=b.x-a.x; var dy=b.y-a.y; return dx*dx+dy*dy;
 }
 g_snapRadius=5;
 
 // any polygon points that are colinear with prev/next deemed extraneous - remove
 function trimPolyPoints(poly) {
-  newpoints=[];
+  var newpoints=[];
   if (poly.points.length<3) {return;}
-  num=poly.points.length;
+  var num=poly.points.length;
   for (var i=0; i<num; i++) {
      iprev=(i+num-1)%num;
      inext=(i+1)%num;
@@ -410,7 +411,7 @@ function pickPointAt(cursorPt) {
 }
 
 function pickOrMakePoint(cursorPt){
-  vt=pickPointAt(cursorPt);
+  var vt=pickPointAt(cursorPt);
   if (vt) {return vt;}
   // makes a free point assuming it will be used.
   return vfromxy(cursorPt.x, cursorPt.y);
@@ -425,7 +426,7 @@ function IsVisible(pl){
 }
 
 function pickPolyAt(cursorPt){
-	picked=pickPolyFeatureAt(cursorPt);
+	var picked=pickPolyFeatureAt(cursorPt);
 	if (picked){
 		return picked.poly;
 	}
@@ -543,7 +544,8 @@ function drawFeedbackDrawQuadstrip(context){
 }
 
 function polyCentre(poly){
-   tx=0,ty=0;
+   var tx=0;
+   var ty=0;
    var accum=vzero();
    for (var i=0; i<poly.length; i++){
      vaddto(accum, poly[i]);
@@ -560,7 +562,7 @@ function drawFeedbackPickPolyPoint(ctx) {
 }
 function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
-	pt = pickPointAt(g_mousepos);
+	var pt = pickPointAt(g_mousepos);
 	if (pt){
 	    vfillcircle(ctx,pt,g_snapRadius);
 	}
@@ -613,7 +615,7 @@ function drawStatusInfo(ctx) {
 	ctx.textAlign="left";
 	ctx.fillStyle=g_currentPolyOutline;
 
-	text=g_tool.name+"\n";
+	var text=g_tool.name+"\n";
 	text+="x="+g_mousepos.x+" y="+g_mousepos.y;
 	ctx.globalAlpha=0.75;
 	ctx.fillStyle="#000000";
@@ -648,7 +650,7 @@ function repaint() {
   }
 //draw background
   context.globalAlpha=1.0;
-  img=g_img;
+  var img=g_img;
   context.drawImage(img,0,0,img.width,img.height,0,0,g_scaled_w,g_scaled_h);
 
 //  if (g_currentPoly>g_polys.length){currentPoly=-1;}
@@ -766,12 +768,12 @@ function drawPolygons(context,polys,parent,sel){
 
 function getCurrentLabel(){
 // get the entered label and cache it.
-val= document.getElementById("currentLabel").value; g_presetLabels[g_presetLabelIndex]=val; return val;}
+	var val= document.getElementById("currentLabel").value; g_presetLabels[g_presetLabelIndex]=val; return val;}
 function setCurrentLabel(newval){document.getElementById("currentLabel").value=newval;}
 
 function IncWrap(val,inc,max){
   if (max==0) return 0;
-  next=val+inc;
+  var next=val+inc;
   if (next<0)next+=max;  
   return next%max;
 }
@@ -1053,7 +1055,7 @@ g_selectTool={
 
 function foreachVertexSub(polys,f){
 	for (var i=0; i<polys.length;i++){
-		pl=polys[i];
+		var pl=polys[i];
 		for (var j=0; j<pl.points.length; j++){
 			f(pl.points[j])
 		}
@@ -1066,7 +1068,7 @@ function foreachVertex(f){
 
 function foreachVertexOfPolygonSub(f){
 	for (var i=0; i<g_polys.length;i++){
-		pl=g_polys[i];
+		var pl=g_polys[i];
 		for (var j=0; j<pl.points.length; j++){
 			f(pl.points[j],pl);
 		}
@@ -1082,7 +1084,7 @@ function foreachVertexOfPolygon(f){
 
 function foreachEdgeOfPolygonSub(f){
 	for (var i=0; i<g_polys.length;i++){
-		pl=g_polys[i];
+		var pl=g_polys[i];
 		for (var j=0; j<pl.points.length; j++){
 			f(pl.points[j],pl.points[(j+1)%pl.points.length],pl);
 		}
@@ -1101,10 +1103,10 @@ function extrudeTaggedVertices(){
 	foreachPolygon(function(pl){
 		// todo - full poly extrusion logic.
 		for (var j=0; j<pl.points.length; j++){
-			va=pl.points[j];
-			vb=pl.points[(j+1)%pl.points.length];
+			var va=pl.points[j];
+			var vb=pl.points[(j+1)%pl.points.length];
 			if (va.tag && vb.tag){
-				edge=[va,vb];
+				var edge=[va,vb];
 				extrudeEdges.push(edge);
 				exvs.set(va,true);
 				exvs.set(vb,true);
@@ -1115,7 +1117,7 @@ function extrudeTaggedVertices(){
 		"extruded vertices count"+extrudedv.length);
 
 	// make the extruded vertices
-	exvi=0;
+	var exvi=0;
 	foreachVertex(function(v){
 		// foreach vertex can hit vertices multiple times!
 		if (exvs.has(v) && !extrudedv.has(v)){
@@ -1126,11 +1128,11 @@ function extrudeTaggedVertices(){
 		exvi+=1;
 		v.tag=false;
 	});
-	exvstr=""
+	var exvstr=""
 	extrudedv.forEach
 	// connect polys for extrusions
 	for (var i=0; i<extrudeEdges.length; i++){
-		e=extrudeEdges[i];
+		var e=extrudeEdges[i];
 		console.log("extruded edge:"+JSON.stringify(e));
 		newpoly=makeQuad(e[0],extrudedv.get(e[0]),extrudedv.get(e[1]),e[1],"");
 		AddPoly(newpoly);
@@ -1280,7 +1282,7 @@ g_adjustTool={
 	}
   },
   mousedown: function(e){
-    pick=pickPolyFeatureAt(g_mousepos);
+    var pick=pickPolyFeatureAt(g_mousepos);
     if (pick.poly){
       g_currPoly=pick.poly;
       g_adjustPoint=pick;
@@ -1728,7 +1730,7 @@ function foreachPolygonEdge(pls,f){
 
 function foreachPolygonSub(pls,f){
 	for (var i=0; i<pls.length; i++){
-		pl=pls[i];
+		var pl=pls[i];
 		f(pl);
 		if (pl.polygons){foreachPolygonSub(pl.polygons,f);}
 	}
