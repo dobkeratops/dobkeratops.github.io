@@ -92,8 +92,8 @@ var g_randomColors=[
   "#8000c0","#c08000","#80c000",
   "#0080c0","#c00080","#00c080",
 ];
-function AddPoly(poly){ clr=g_defaultColors[poly.name]; if (clr){poly.color=clr;} else {poly.color=g_randomColors[g_polys.length % g_randomColors.length]}; g_polys.push(poly); g_currentPoly=g_polys.length-1;}
-var g_currentPoly=-1;
+function AddPoly(poly){ clr=g_defaultColors[poly.name]; if (clr){poly.color=clr;} else {poly.color=g_randomColors[g_polys.length % g_randomColors.length]}; g_polys.push(poly); g_currPoly=g_polys[g_polys.length-1];}
+var g_currPoly=null;
 var g_drawingPoly=[];
 var g_presetLabelIndex=0;
 var g_showLabelNames=true;
@@ -139,33 +139,49 @@ if (urlgadget){
 }
 // mini maths lib
 function vaddto(lhs,rhs){lhs.x+=rhs.x;lhs.y+=rhs.y;}
-function vadd(lhs,rhs){return {x:lhs.x+rhs.x, y:lhs.y+rhs.y};}
-function vsub(lhs,rhs){return {x:lhs.x-rhs.x, y:lhs.y-rhs.y};}
+function vadd(lhs,rhs){return {x:lhs.x+rhs.x, y:lhs.y+rhs.y, z:lhs.z+rhs.z};}
+function vmulElem(lhs,rhs){return {x:lhs.x*rhs.x, y:lhs.y*rhs.y, z:lhs.z*rhs.z};}
+function vsumElem(a){return a.x+a.y+a.z;}
+function vsub(lhs,rhs){return {x:lhs.x-rhs.x, y:lhs.y-rhs.y, z:lhs.z-rhs.z};}
 function vabs(v){return {x:Math.abs(v.x), y:Math.abs(v.y)}; }
-function vfromxy(vx,vy){return {x:vx,y:vy};}
+function vfromxy(vx,vy){return {x:vx,y:vy,z:0};}
+function vfromxyz(vx,vy,vz){return {x:vx,y:vy,z:vz};}
 function lerp(a,b,f){return (b-a)*f+a;}
 function vlerp(a,b,f){
-	return {x:lerp(a.x,b.x,f), y:lerp(a.y,b.y,f)};
+	return {x:lerp(a.x,b.x,f), y:lerp(a.y,b.y,f), z:lerp(a.z,b.z,f)};
 }
-function vzero(){return {x:0,y:0}}
-function vonex(){return {x:1,y:0}}
-function voney(){return {x:0,y:1}}
-function vone(){return {x:1,y:1}}
-function vsplat(s){return {x:x,y:s}}
-function vmax(a,b){return {x:Math.max(a.x,b.x),y:Math.max(a.y,b.y)}}
-function vmin(a,b){return {x:Math.min(a.x,b.x),y:Math.min(a.y,b.y)}}
+function vzero(){return {x:0,y:0,z:0}}
+function vaxisx(){return {x:1,y:0,z:0}}
+function vaxisy(){return {x:0,y:1,z:0}}
+function vaxisz(){return {x:0,y:0,z:1}}
+function vone(){return {x:1,y:1,z:1}}
+function vsplat(s){return {x:x,y:s,z:s}}
+function vmax(a,b){return {x:Math.max(a.x,b.x),y:Math.max(a.y,b.y),y:Math.max(a.z,b.z)}}
+function vmin(a,b){return {x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),z:Math.max(a.z,b.z)}}
 
 function vmadd(a,b,f){
-	return {x:a.x+b.x*f,y:a.y+b.y*f}
+	return {x:a.x+b.x*f, y:a.y+b.y*f, z:a.z+b.z*f}
 }
-function vscale(a,f){return {x:a.x*f,y:a.y*f}};
-function vmulElem(a,b){return {x:a.x*b.x,y:a.y*b.y}};
-function vdot(a,b){return a.x*b.x+a.y*b.y;}
+function vscale(a,f){return {x:a.x*f, y:a.y*f z:a.z*f}};
+function vmulElem(a,b){return {x:a.x*b.x, y:a.y*b.y, z:a.z*b.z}};
+function vdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 function sqr(x){return x*x;}
 function vsqr(v){return vdot(v,v);}
 function vcross2d(a,b){return a.x*b.y-a.y*b.x;}
+function vlength(x){return Math.sqrt(vsqr(a));}
+function vdist(a,b){return vlength(vsub(a,b));}
+function vdistSquared(a,b){return vsqr(vsub(a,b));}
+function vcross(a,b){
+	return {
+		x:a.y*b.z-a.z*b.y,
+		y:a.z*b.y-a.y*b.z,
+		z:a.x*b.y-a.y*b.x}
+}
+function vnorm(a){ return vscale(a,1.0/Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z))}
+function vtrianglenorm(a,b,c){return vnorm(vcross(vsub(b,a),vsub(c,a)));}
+function vperp(a,n){ return vmadd(a,n, -vdot(a,n));}
 function vaverage(a,b){
-  return {x:(a.x+b.x)/2, y:(a.y+b.y)/2}
+  return {x:(a.x+b.x)/2, y:(a.y+b.y)/2, z:(a.z+b.z)/2}
 }
 
 
@@ -186,16 +202,17 @@ function polyDiagonalHexFromRect(rc) {
   y1 = rc.end.y;
   fx=0.75; fy=0.125; // trim a little from the diagonal
   fyy=0.035;
+  z=0.0;
 
   if (width > height) { // wider than tall - split horiz
      return {
       points:[
-        vfromxy(x0,lerp(y0,y1,fyy)),
-        vfromxy(lerp(x0,x1,fx),y0),
-        vfromxy(x1,   lerp(y0,y1,fy)),
-        vfromxy(x1,   lerp(y1,y0,fyy)),
-        vfromxy(lerp(x1,x0,fx), y1),
-        vfromxy(x0,   lerp(y1,y0,fy))
+        vfromxyz(x0,lerp(y0,y1,fyy,	z)),
+        vfromxyz(lerp(x0,x1,fx),y0,	z),
+        vfromxyz(x1,   lerp(y0,y1,fy),	z),
+        vfromxyz(x1,   lerp(y1,y0,fyy),	z),
+        vfromxyz(lerp(x1,x0,fx), y1,	z),
+        vfromxyz(x0,   lerp(y1,y0,fy),	z)
       ],
       name:rc.name
      };
@@ -203,12 +220,12 @@ function polyDiagonalHexFromRect(rc) {
      midy=(rc.start.y+rc.end.y)*0.5;
      return {
       points:[
-        vfromxy(lerp(x0,x1,fyy),     y0),
-        vfromxy(lerp(x1,x0,fy),     y0),
-        vfromxy(x1,     lerp(y0,y1,fy)),
-        vfromxy(lerp(x1,x0,fyy),     y1),
-        vfromxy(lerp(x0,x1,fy),  y1),
-        vfromxy(x0,      lerp(y1,y0,fy))
+        vfromxyz(lerp(x0,x1,fyy),     y0,z),
+        vfromxyz(lerp(x1,x0,fy),     y0,z),
+        vfromxyz(x1,     lerp(y0,y1,fy),z),
+        vfromxyz(lerp(x1,x0,fyy),     y1,z),
+        vfromxyz(lerp(x0,x1,fy),  y1,z),
+        vfromxyz(x0,      lerp(y1,y0,fy),z)
       ],
       name:rc.name
     };
@@ -233,17 +250,17 @@ function polyOctFromRect(rc) {
   x1 = rc.end.x;
   y1 = rc.end.y;
   t=0.1; // trim a little from the corners
-
+  z=0;
   return {
     points:[
-      vfromxy(lerp(x0,x1,t),  y0),
-      vfromxy(lerp(x1,x0,t),  y0),
-      vfromxy(x1,  lerp(y0,y1,t)),
-      vfromxy(x1,  lerp(y1,y0,t)),
-      vfromxy(lerp(x1,x0,t),  y1),
-      vfromxy(lerp(x0,x1,t),  y1),
-      vfromxy(x0,  lerp(y1,y0,t)),
-      vfromxy(x0,  lerp(y0,y1,t)),
+      vfromxyz(lerp(x0,x1,t),  y0,z),
+      vfromxyz(lerp(x1,x0,t),  y0,z),
+      vfromxyz(x1,  lerp(y0,y1,t),z),
+      vfromxyz(x1,  lerp(y1,y0,t),z),
+      vfromxyz(lerp(x1,x0,t),  y1,z),
+      vfromxyz(lerp(x0,x1,t),  y1,z),
+      vfromxyz(x0,  lerp(y1,y0,t),z),
+      vfromxyz(x0,  lerp(y0,y1,t),z),
     ],
     name:rc.name
   };
@@ -259,7 +276,7 @@ function trimPolyPoints(poly) {
   newpoints=[];
   if (poly.points.length<3) {return;}
   num=poly.points.length;
-  for (i=0; i<num; i++) {
+  for (var i=0; i<num; i++) {
      iprev=(i+num-1)%num;
      inext=(i+1)%num;
      pt=poly.points[i];
@@ -373,18 +390,22 @@ function dragFeedbackLine(context){
 }
 
 function pickPointAt(cursorPt) {
-  vertex=null;
-  minDist2=g_snapRadius*g_snapRadius;
-  for (pli=0; pli<g_polys.length; pli++) {
-    pl=g_polys[pli];
-    for (pti=0; pti<pl.points.length; pti++) {
-       d2=distSquared2d(pl.points[pti],cursorPt);
-       if (d2<minDist2){
-         minDist2=d2;
-         vertex=pl.points[pti];    
-       }  
+  var vertex=null;
+  var minDist2=g_snapRadius*g_snapRadius;
+  var pickPointAtSub=function (polys){
+    for (var pli=0; pli<polys.length; pli++) {
+	  var pl=polys[pli];
+      for (var pti=0; pti<pl.points.length; pti++) {
+         d2=distSquared2d(pl.points[pti],cursorPt);
+         if (d2<minDist2){
+           minDist2=d2;
+           vertex=pl.points[pti];
+		 }
+       }
+	  if (pl.polygons) {pickPointAtSub(pl.polygons,cursorPt);}
     }
   }
+  pickPointAtSub(g_polys);
   return vertex;
 }
 
@@ -398,59 +419,80 @@ function pickOrMakePoint(cursorPt){
 //  return newpl.points[0];
 }
 
-function IsVisible(pli){
+function IsVisible(pl){
    if (g_showAllPolys){return true;}
-   return pli==g_currentPoly;
+   return pl==g_currPoly;
 }
 
-function pickPolyFeatureAt(cursorPt){
-  picked={pointIndex:-1,polyIndex:-1,edgeIndex:-1,edgeFraction:0.0,point:{}};
-  minDist2=10000*10000;
+function pickPolyAt(cursorPt){
+	picked=pickPolyFeatureAt(cursorPt);
+	if (picked){
+		return picked.poly;
+	}
+	return null;
+}
+function pickPolyFeatureAt(cursorPt) {
+	var picked={
+		selPoint:null,
+		poly:null,
+		edge:null,
+		edgeFraction:0.0,
+		pickedPoint:null
+	};
+	var minDist2=10000*10000;
 
-  for (pli=0; pli<g_polys.length; pli++) {
-    if (!IsVisible(pli)){continue;}
-    pl=g_polys[pli];
+	var pickPolyFeatureAtSub=function(polys) {
+		var pl=null;
+		for (var pli=0; pli<polys.length; pli++) {
+			if (!IsVisible(pli)){continue;}
+			pl=polys[pli];
 
-    // pick the polygon centre?
-    centre=polyCentre(pl.points);
-    d2=distSquared2d(centre,cursorPt);
-    if (d2<minDist2 && d2<g_snapRadius*g_snapRadius){
-       minDist2=d2;
-       picked.edgeIndex=-1;
-       picked.pointIndex=-1;
-       picked.polyIndex=pli;
-       picked.pickedPoint=centre;
-    }
-    // pick polygon Edge?
-    for (pti=0; pti<pl.points.length; pti++) {
-       pti1=(pti+1)%pl.points.length;
-       edgeCentre=vaverage(pl.points[pti],pl.points[pti1]);
-       d2=distSquared2d(edgeCentre,cursorPt);
-       if (d2<=minDist2){
-         minDist2=d2;
-         picked.polyIndex=pli;
-         picked.edgeIndex=pti;
-         picked.pointIndex=-1;
-         picked.pickedPoint=edgeCentre;
-       } 
-    }    
-    
-    // pick polygon vertex?
-    for (pti=0; pti<pl.points.length; pti++) {
-      pt=pl.points[pti];
-      d2=distSquared2d(pt,cursorPt);
-      if (d2<=minDist2){
-         minDist2=d2;
-         picked.pointIndex=pti;
-         picked.polyIndex=pli;
-         picked.edgeIndex=-1;
-         picked.pickedPoint=pt;
-      }
-    }
+			// pick the polygon centre?
+			centre=polyCentre(pl.points);
+			d2=distSquared2d(centre,cursorPt);
+			if (d2<minDist2 && d2<g_snapRadius*g_snapRadius){
+				minDist2=d2;
+				picked.edge=null;
+				picked.selPoint=null;
+				picked.poly=pl;
+				picked.pickedPoint=centre;
+			}
+			// pick polygon Edge?
+			for (var pti=0; pti<pl.points.length; pti++) {
+				pti1=(pti+1)%pl.points.length;
+				var evs=pl.points[pti];
+				var eve=pl.points[pti1];
+				var edgeCentre=vaverage(evs,eve);
+				var d2=distSquared2d(edgeCentre,cursorPt);
+				if (d2<=minDist2){
+					minDist2=d2;
+					picked.poly=pl;
+					picked.edge=[evs,eve];
+					picked.selPoint=null;
+					picked.pickedPoint=edgeCentre;
+				} 
+			}    
 
-    
-  }
-  return picked;
+			// pick polygon vertex?
+			for (var pti=0; pti<pl.points.length; pti++) {
+				pt=pl.points[pti];
+				var d2=distSquared2d(pt,cursorPt);
+				if (d2<=minDist2){
+					minDist2=d2;
+					picked.selPoint=pt;
+					picked.poly=pl;
+					picked.edge=null;
+					picked.pickedPoint=pt;
+				}
+			}
+			// check components...
+			if (pl.polygons) {
+				pickPolyFeatureAtSub(pl.polygons);
+			}
+		}
+	};
+	pickPolyFeatureAtSub(g_polys);
+	return picked;
 }
 
 function drawFeedbackDrawPoly(context){
@@ -466,10 +508,11 @@ function drawFeedbackDrawPoly(context){
       }
       context.beginPath();
       vmoveto(context,g_drawingPoly[0]);
-      for (i=1; i<g_drawingPoly.length; i++){
+      for (var i=1; i<g_drawingPoly.length; i++){
         vlineto(context,g_drawingPoly[i]);
       }
       vlineto(context,endpt);
+      vlineto(context,g_drawingPoly[0]);
       context.stroke();
     }
     dragFeedbackCrosshair(context);
@@ -502,7 +545,7 @@ function drawFeedbackDrawQuadstrip(context){
 function polyCentre(poly){
    tx=0,ty=0;
    var accum=vzero();
-   for (i=0; i<poly.length; i++){
+   for (var i=0; i<poly.length; i++){
      vaddto(accum, poly[i]);
    }
    return vscale(accum, 1.0/poly.length);
@@ -510,12 +553,10 @@ function polyCentre(poly){
 
 function drawFeedbackPickPolyPoint(ctx) {
 	ctx.globalAlpha=0.5;
-  picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(g_mousepos);
-  if (picked.polyIndex>=0) {
-     pt=(picked.edgeIndex>=0)?picked.pickedPoint:(picked.pointIndex>=0)?g_polys[picked.polyIndex].points[picked.pointIndex]:picked.pickedPoint;
-   
-    vfillcircle(ctx,pt,g_snapRadius);
-  }
+	picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(g_mousepos);
+	if (picked.poly) { 
+		vfillcircle(ctx,picked.pickedPoint,g_snapRadius);
+	}
 }
 function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
@@ -581,6 +622,20 @@ function drawStatusInfo(ctx) {
 	ctx.fillText(text,20, 20);
 }
 
+function drawHrc(context,x,y,polys){
+	context.textAlign="left";
+	
+	for (var i=0; i<polys.length; i++){
+		pl=polys[i];
+		context.fillText(pl.name, x,y);
+		y+=20;
+		if (pl.polygons){
+			y=drawHrc(context,x+10,y,pl.polygons);
+		}
+	}
+	return y;
+}
+
 function repaint() {
   var canvas = document.querySelector("canvas");
   var context = canvas.getContext("2d");
@@ -591,26 +646,35 @@ function repaint() {
 
     return;
   }
-  if (g_currentPoly>g_polys.length){currentPoly=-1;}
-  g_showLabelNames=document.getElementById("showLabels").checked;
-  g_showAllPolys=document.getElementById("showAllPolys").checked;  
-  console.log(document.getElementById("showLabels").checked);
- 
+//draw background
   context.globalAlpha=1.0;
   img=g_img;
   context.drawImage(img,0,0,img.width,img.height,0,0,g_scaled_w,g_scaled_h);
-  context.filter="blur(5px)";
+
+//  if (g_currentPoly>g_polys.length){currentPoly=-1;}
+  drawPolygons(context,g_polys,null,false);
+//  drawHrc(context,50,50,g_polys);
+  
+  // show current tool feedback
+  if (g_drawfeedback){
+    g_drawfeedback(context);
+  }
+
+  drawStatusInfo(context);
+}
+
+function drawPolygons(context,polys,parent,sel){
+  g_showLabelNames=document.getElementById("showLabels").checked;
+  g_showAllPolys=document.getElementById("showAllPolys").checked;   
 
   context.globalAlpha=0.5;
-
   context.fillStyle = "green";
-
   context.strokeStyle="#00ff00";
   var textHeight;
   if (g_polys.length<8){
     textHeight=20.0;
     context.font = "20px Arial";
-  } else if(g_polys.length<16){
+  } else if(polys.length<16){
     textHeight=15.0;
     context.font = "15px Arial";
   }else{
@@ -619,12 +683,12 @@ function repaint() {
   }
 
   // Show polys
-  for (pli=0; pli<g_polys.length; pli++){
+  for (var pli=0; pli<polys.length; pli++){
     if (!IsVisible(pli)) continue;
-    pl=g_polys[pli];
+    pl=polys[pli];
 
     // account for selection in rendering style.
-    currentPolyOutlineColor = (pli==g_currentPoly)?g_currentPolyOutline:pl.color;
+    currentPolyOutlineColor = (pl==g_currPoly || sel)?g_currentPolyOutline:pl.color;
 
 
     // fill the area
@@ -632,7 +696,7 @@ function repaint() {
     if (pl.points.length>2){
       context.beginPath();
       context.moveTo(pl.points[pl.points.length-1].x,pl.points[pl.points.length-1].y);
-      for (j=0; j<pl.points.length; j++) {
+      for (var j=0; j<pl.points.length; j++) {
         context.lineTo(pl.points[j].x,pl.points[j].y);
       }
       context.closePath();
@@ -644,7 +708,7 @@ function repaint() {
     context.fillStyle=currentPolyOutlineColor;
     if (g_showVertices){
 	  var tags=0;
-      for (j=0; j<pl.points.length; j++) {
+      for (var j=0; j<pl.points.length; j++) {
 		vt=pl.points[j];
 		size=vt.tag?g_snapRadius:g_snapRadius/2;
         vfillcircle(context,pl.points[j],size);
@@ -668,7 +732,7 @@ function repaint() {
       context.lineTo(pos.x,pos.y+g_snapRadius*2);
       context.stroke();
     }
-    else for (j=0; j<pl.points.length; j++) { // it's a prpper poly.
+    else for (var j=0; j<pl.points.length; j++) { // it's a prpper poly.
       context.lineTo(pl.points[j].x,pl.points[j].y);
     }
    
@@ -682,7 +746,7 @@ function repaint() {
 //       context.globalAlpha=(pli==g_currentPoly)?0.5:0.25;
 //      context.fillStyle = "black";
 //      context.fillRect(pos.x-textWidth/2,pos.y-textHeight/2, textWidth, textHeight);
-      context.globalAlpha=(pl.tag ||(pli==g_currentPoly))?1.0:0.75;
+      context.globalAlpha=(pl.tag ||(pl==g_currPoly))?1.0:0.75;
       context.fillStyle = g_labelColor;
       if (pl.points.length==2){
          drawSaneRotatedText(context,pl.name, pos.x,pos.y, Math.atan2(pl.points[1].y-pl.points[0].y, pl.points[1].x-pl.points[0].x))
@@ -691,14 +755,12 @@ function repaint() {
         context.fillText(pl.name,pos.x,pos.y);
       }
     }
+	// does this polygon have components..
+	if (pl.polygons){
+		drawPolygons(context,pl.polygons,pl,sel||(pl==g_currPoly));
+	}
   }
 
-  // show current tool feedback
-  if (g_drawfeedback){
-    g_drawfeedback(context);
-  }
-
-  drawStatusInfo(context);
 }
 
 
@@ -718,7 +780,8 @@ function TogglePresetLabel(dir){
   setCurrentLabel(g_presetLabels[g_presetLabelIndex]);
 }
 function ToggleCurrentPoly(dir){
-  g_currentPoly=IncWrap(g_currentPoly,dir,g_polys.length);  
+  console.log("TODO");
+//  g_currentPoly=IncWrap(g_currentPoly,dir,g_polys.length);  
   repaint();
 }
 
@@ -760,11 +823,50 @@ g_hexTool=makeRectToolVariant(polyDiagonalHexFromRect,"draw diagonal hexagon");
 g_octTool=makeRectToolVariant(polyOctFromRect,"draw octagon");
 g_rectTool=makeRectToolVariant(polyFromRect,"draw rect");
 
-g_lineTool={
+function addChild(parent,pl){
+	console.log("set parent:"+parent.name+"->"+pl.name);
+	if (!parent.polygons){
+		parent.polygons=[];
+	}
+	parent.polygons.push(pl);
+
+}
+
+function dumpHrc(pls,indent){
+	for (var i=0; i<pls.length; i++){
+		var pl=pls[i];
+		var str=""; for (var j=0; j<indent; j++){str+="\t";}
+		console.log(str+pl.name);
+		if (pl.polygons){dumpHrc(pl.polygons, indent+1);}
+	}
+}
+g_parentTool={
+	name:"set object parents (pick parts)",
+	activate: function(e){ g_drawfeedback=drawFeedbackPickPolyPoint; g_currPoly=0;},
+	mouseclickup:function(e){
+		console.log("change hrc: before:- "+g_polys.length);
+		dumpHrc(g_polys,0);
+		var poly=pickPolyAt(g_mousepos);
+		if (!g_currPoly){g_currPoly=poly; repaint();}
+		else if (g_currPoly && poly){
+			if(!isParentOf(g_currPoly,poly) && poly!=g_currPoly){
+				pls=getListContainingPoly(poly);
+				removeFromArray(pls,poly);
+				addChild(g_currPoly,poly);
+			}
+		}
+		console.log("after:-"+g_polys.length);
+		dumpHrc(g_polys,0);
+		console.log("done");
+	}
+};
+
+g_dragLineTool={
   name:"draw edges",
   activate: function(e){
      g_drawfeedback=dragFeedbackCrosshair;
 	 SetCursor("crosshair");
+	 return true;
   },
 
   mousedown: function(e){
@@ -790,20 +892,21 @@ g_lineTool={
 };
 
 
-function makeDrawToolVariant(_name,drawFn){
+function makeDrawToolVariant(_name,drawFn,rclickfn){
 	tool={
 	  name:_name,
 	  activate: function(e){
-		 g_drawfeedback=dragFeedbackCrosshair;
-		g_drawingPoly=[];
-		 SetCursor("crosshair");
-
+			g_drawfeedback=dragFeedbackCrosshair;
+			g_drawingPoly=[];
+			SetCursor("crosshair");
+			return true;
 	  },
 	  mousedown: drawFn,
 	  mouseclickup:function(e){
 	  },
 	  mouseup:function(e){
 	  },
+	  mouserightclick:rclickfn,
 	  cancel:function(){
 		 g_drawingPoly=[];
 	  }
@@ -811,19 +914,27 @@ function makeDrawToolVariant(_name,drawFn){
 	return tool;
 }
 
-g_polyTool=makeDrawToolVariant("polygon",function(e){
-  g_drawfeedback=drawFeedbackDrawPoly;
-  console.log("add poly point");
-  if (g_drawingPoly.length>2){
-	if (distSquared2d(g_mousepos,g_drawingPoly[0])<sqr(g_snapRadius)){
-	  console.log("finish poly");
-	  AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
-	  g_drawingPoly=[];
-	  return;
+g_polyTool=makeDrawToolVariant(
+	"polygon",
+	function(e){
+		g_drawfeedback=drawFeedbackDrawPoly;
+		console.log("add poly point");
+		if (g_drawingPoly.length>2){
+			if (distSquared2d(g_mousepos,g_drawingPoly[0])<sqr(g_snapRadius)){
+				console.log("finish poly");
+				AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+				g_drawingPoly=[];
+				return;
+			}
+		}
+		g_drawingPoly.push(pickOrMakePoint(g_mousepos));
+	},
+	function(e){
+		g_drawingPoly.push(pickOrMakePoint(g_mousepos));
+		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+		g_drawingPoly=[];
 	}
-  }
-  g_drawingPoly.push(pickOrMakePoint(g_mousepos));
-});
+);
 
 g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
   g_drawfeedback=drawFeedbackDrawQuadstrip;
@@ -847,7 +958,8 @@ g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
 	  g_drawingPoly=[vt2,vt3];
 	  return;
 	}
-  }
+  },
+  function(e){g_drawingPoly=[];}
 );
 
 
@@ -859,7 +971,6 @@ g_pointTool={
     g_adjustPoint=null;
     g_drawfeedback=dragFeedbackCrosshair;
 	SetCursor("crosshair");
-
   },
   mousedown: function(e){
       console.log("add  point");
@@ -881,7 +992,7 @@ function splitEdgeOfPoly(poly, v0,v1, vmid) {
 	if (poly.points.length==2){
 	    if (poly.points[0]==v0 && poly.points[1]==v1 || poly.points[1]==v0 && poly.points[0]==v1 ) {
 			console.log("splitEdgeOfPoly-do edge split");
-			var splitpoly=g_polys[g_adjustPoint.polyIndex];
+			var splitpoly=g_adjustPoint.poly;
 			poly.points[0]=v0;
 			poly.points[1]=vmid;
 			AddPoly( polyFromLine(vmid,v1, poly.name));
@@ -906,9 +1017,9 @@ function getIndexOfPoint(poly,pt){
 	return -1;
 }
 function clearVertexSelectionTags(){
-	for (i=0; i<g_polys.length;i++){
+	for (var i=0; i<g_polys.length;i++){
 		pl=g_polys[i];
-		for (j=0; j<pl.points.length; j++){
+		for (var j=0; j<pl.points.length; j++){
 			pl.points[j].tag=false;
 		}
 	}
@@ -940,28 +1051,46 @@ g_selectTool={
 	}
 };
 
+function foreachVertexSub(polys,f){
+	for (var i=0; i<polys.length;i++){
+		pl=polys[i];
+		for (var j=0; j<pl.points.length; j++){
+			f(pl.points[j])
+		}
+		if (pl.polygons){foreachVertexSub(pl,f);}
+	}
+}
 function foreachVertex(f){
-	for (i=0; i<g_polys.length;i++){
-		for (j=0; j<g_polys[i].points.length; j++){
-			f(g_polys[i].points[j])
+	foreachVertexSub(g_polys,f);
+}
+
+function foreachVertexOfPolygonSub(f){
+	for (var i=0; i<g_polys.length;i++){
+		pl=g_polys[i];
+		for (var j=0; j<pl.points.length; j++){
+			f(pl.points[j],pl);
+		}
+		if (pl.polygons){
+			foreachVertexOfPolygonSub(pl.polygons,f);
 		}
 	}
 }
+
 function foreachVertexOfPolygon(f){
-	for (i=0; i<g_polys.length;i++){
+	foreachVertexOfPolygonSub(g_polys,f);
+}
+
+function foreachEdgeOfPolygonSub(f){
+	for (var i=0; i<g_polys.length;i++){
 		pl=g_polys[i];
-		for (j=0; j<pl.points.length; j++){
-			f(pl.points[j],pl);
+		for (var j=0; j<pl.points.length; j++){
+			f(pl.points[j],pl.points[(j+1)%pl.points.length],pl);
 		}
+		if (pl.polygons){foreachEdgeOfPolygonSub(pl.polygons,f);};
 	}
 }
 function foreachEdgeOfPolygon(f){
-	for (i=0; i<g_polys.length;i++){
-		pl=g_polys[i];
-		for (j=0; j<pl.points.length; j++){
-			f(pl.points[j],pl.points[(j+1)%pl.points.length],pl);
-		}
-	}
+	foreachEdgeOfPolygonSub(g_polys,f);
 }
 
 function extrudeTaggedVertices(){
@@ -969,10 +1098,9 @@ function extrudeTaggedVertices(){
 	var extrudeEdges=[];
 	var exvs=new Map();
 	var extrudedv=new Map();
-	for (i=0; i<g_polys.length;i++){
-		pl=g_polys[i];
+	foreachPolygon(function(pl){
 		// todo - full poly extrusion logic.
-		for (j=0; j<pl.points.length; j++){
+		for (var j=0; j<pl.points.length; j++){
 			va=pl.points[j];
 			vb=pl.points[(j+1)%pl.points.length];
 			if (va.tag && vb.tag){
@@ -982,7 +1110,7 @@ function extrudeTaggedVertices(){
 				exvs.set(vb,true);
 			}
 		}
-	}
+	});
 	console.log("extruded edges count="+extrudeEdges.length+"\n"+
 		"extruded vertices count"+extrudedv.length);
 
@@ -1001,14 +1129,14 @@ function extrudeTaggedVertices(){
 	exvstr=""
 	extrudedv.forEach
 	// connect polys for extrusions
-	for (i=0; i<extrudeEdges.length; i++){
+	for (var i=0; i<extrudeEdges.length; i++){
 		e=extrudeEdges[i];
 		console.log("extruded edge:"+JSON.stringify(e));
 		newpoly=makeQuad(e[0],extrudedv.get(e[0]),extrudedv.get(e[1]),e[1],"");
 		AddPoly(newpoly);
 	}
 	console.log("extrude edges "+ extrudeEdges.length +" vertices="+extrudedv.length);
-	for (i=0; i<extrudedv.length; i++){
+	for (var i=0; i<extrudedv.length; i++){
 		
 	}
 }
@@ -1070,10 +1198,10 @@ function multiSelectMouseDown(e) {
 	console.log("multi select click\n");
 	g_multiSelectDrag=true;
     var pick=pickPolyFeatureAt(g_mousepos);
-    if (pick.polyIndex>=0){
-      g_currentPoly=pick.polyIndex;
+    if (pick.poly){
+      g_currPoly=pick.poly;
       g_adjustPoint=pick;
-      if (pick.pointIndex>=0){
+      if (pick.point){
         console.log("move point..");
       }
     }
@@ -1081,8 +1209,8 @@ function multiSelectMouseDown(e) {
 	if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
 	if (!pt){
 		g_hackMoveTaggedVertices=false;
-		if (pick.pointIndex>=0){
-			pt=g_polys[pick.polyIndex].points[pick.pointIndex];
+		if (pick.selPoint){
+			pt=pick.selPoint;
 		}
 	}
 	if (pt){
@@ -1107,30 +1235,25 @@ g_adjustTool={
 
       // edge split operation?
 	  var pointToMove;
-      if (g_adjustPoint.edgeIndex>=0){
+      if (g_adjustPoint.edge){
         console.log("move tool-split edge.");
 		clearVertexSelectionTags();
-        var pl=g_polys[g_adjustPoint.polyIndex];
-        var pti1=(g_adjustPoint.edgeIndex+1)%pl.points.length;
-        var edgeStart=pl.points[g_adjustPoint.edgeIndex];
-        var edgeEnd=pl.points[pti1];
+        var pl=g_adjustPoint.poly;
+        var [edgeStart,edgeEnd]=g_adjustPoint.edge;
         newPt=vaverage(edgeStart,edgeEnd);
 
         //newPt=g_mousepos;
         // step through all the polys again, because the vertices/edge may be shared.
-   
-        for (var i=0; i<g_polys.length; i++) {
-           splitEdgeOfPoly(g_polys[i], edgeStart,edgeEnd, newPt);
-        }
+
+		foreachPolygon( function(pl){ splitEdgeOfPoly(pl, edgeStart,edgeEnd, newPt) } );
 		pointToMove = newPt;
-		g_adjustPoint.edgeIndex=-1;
-		g_adjustPoint.pointIndex=getIndexOfPoint( g_polys[g_adjustPoint.polyIndex], newPt);
-		// repick because geometry changed.
+		g_adjustPoint.edge=null;
+		g_adjustPoint.selPoint=newPt;
 	  }
 
-      pl=g_polys[g_adjustPoint.polyIndex];
+      pl=g_adjustPoint.poly;
 
-      if (g_adjustPoint.pointIndex>=0 || g_hackMoveTaggedVertices){
+      if (g_adjustPoint.selPoint || g_hackMoveTaggedVertices){
 	    if (g_hackMoveTaggedVertices){
 			selectedVertices=GetSelectedVertices();
 			selectedVertices.forEach(function(val,keyvt,map){
@@ -1139,17 +1262,16 @@ g_adjustTool={
 		} else {
 			// todo fix this to ALL be tag based.
         //move a vertex..
-	   		pointToMove = g_polys[g_adjustPoint.polyIndex].points[g_adjustPoint.pointIndex];
+	   		pointToMove = g_adjustPoint.selPoint;
 			vaddto(pointToMove, g_mouseDelta);
 //			pointToMove.x+=g_mouseDelta.x;
 //			pointToMove.y+=g_mouseDelta.y;
 		}
-      } else if (g_adjustPoint.edgeIndex<0 && g_adjustPoint.pointIndex<0) {
+      }
+	  else if (!g_adjustPoint.edge && !g_adjustPoint.selPoint && g_adjustPoint.pickedPoint) {
         // move the whole poly..
         for (pti=0; pti<pl.points.length;pti++){
 			vaddto(pl.points[pti],g_mouseDelta);
-//          .x+=g_mouseDelta.x;
-//          pl.points[pti].y+=g_mouseDelta.y;
         }
       }
     } else{
@@ -1159,10 +1281,10 @@ g_adjustTool={
   },
   mousedown: function(e){
     pick=pickPolyFeatureAt(g_mousepos);
-    if (pick.polyIndex>=0){
-      g_currentPoly=pick.polyIndex;
+    if (pick.poly){
+      g_currPoly=pick.poly;
       g_adjustPoint=pick;
-      if (pick.pointIndex>=0){
+      if (pick.selPoint){
         console.log("move point..");
       }
     }
@@ -1175,8 +1297,8 @@ g_adjustTool={
 	if (!pt){
 		g_hackMoveTaggedVertices=false;
 	    console.log("move point.. pick="+JSON.stringify(pick));
-		if (pick.pointIndex>=0){
-			pt=g_polys[pick.polyIndex].points[pick.pointIndex];
+		if (pick.selPoint){
+			pt=pick.selPoint;
 		}
 	}
 	if (!g_shift) {
@@ -1243,7 +1365,7 @@ function SetTool(tool){
 
 // todo create these+buttons programatically
 document.getElementById("poly").onclick=function(){SetTool(g_polyTool);};
-document.getElementById("line").onclick=function(){SetTool(g_lineTool);};
+document.getElementById("line").onclick=function(){SetTool(g_dragLineTool);};
 document.getElementById("point").onclick=function(){SetTool(g_pointTool);};
 document.getElementById("rect").onclick=function(){SetTool(g_hexTool);};
 document.getElementById("adjust").onclick=function(){SetTool(g_adjustTool);};
@@ -1401,14 +1523,41 @@ editor.addEventListener('mousemove',function(e){
 	repaint();
 });
 
+function removeFromArray(as,a){
+	for (var i=0; i<as.length; i++){
+		if (as[i]===a){
+			for (var j=i;j+1<as.length;j++){
+				as[j]=as[j+1];
+			}
+			as.pop();
+			return;
+		}
+	}
+}
+
+function isParentOf(a,b){
+	if (a.polygons){
+		for (var i=0; i<a.polygons.length; i++){
+			if (a.polygons[i]==b){
+				return true;
+			}
+			if (isParentOf(a.polygons[i],b)){
+				return true;
+			}
+		}
+	} else {
+		return false;
+	}
+}
+
 function RenamePoly(){
   if (g_polys.length<=0) return;
-  currentPoly=g_polys[g_currentPoly];
-  newname=prompt("enter new label",currentPoly.name);
-  currentPoly.name=newname;
+  poly=g_currPoly;
+  newname=prompt("enter new label",poly.name);
+  poly.name=newname;
   console.log(g_defaultColors[newname]);
   if (g_defaultColors[newname]){
-    currentPoly.color=g_defaultColors[newname];
+    poly.color=g_defaultColors[newname];
   }
 }
 function MyConfirm(txt){
@@ -1416,14 +1565,32 @@ function MyConfirm(txt){
 		return true;
 	return confirm(txt);
 }
+function getListContainingPolySub(poly,pls){
+	for (var i=0; i<pls.length; i++){
+		if (pls[i]==poly){
+			return pls;
+		}
+		if (pls[i].polygons){
+			var ret;
+			if (ret=getListContainingPolySub(poly,pls[i].polygons)){
+				return ret;
+			}
+		}
+	}
+	return null;
+}
+function getListContainingPoly(poly){
+	return getListContainingPolySub(poly,g_polys);
+}
 function DeleteCurrentPoly(){
 	console.log("delete a polygon\n");
-  if (g_currentPoly>=0 && g_polys.length>0){
+	if (!g_currPoly){return;}
+	pls=getListContainingPoly(g_currPoly);
     if (!MyConfirm("delete poly:"+g_polys[g_currentPoly].name)){
-      g_polys.splice(g_currentPoly,1);
-      g_currentPoly=IncWrap(g_currentPoly,0,g_polys.length);
-    }
-  }
+		i=getIndexOf(g_currPoly, pls);
+		pls.splice(i,1);
+		g_currPoly=i<pls.length?pls[i]:null;
+	}
 }
 
 function numSelectedVertices(){
@@ -1446,11 +1613,11 @@ function MergeVertices(){
 			return;
 		}
 
-		for (i=0; i<g_polys.length; i++){
+		for (var i=0; i<g_polys.length; i++){
 			pl=g_polys[i];
 			var newpts=[];
 			var lastadded=null;
-			for (j=0; j<pl.points.length; j++){
+			for (var j=0; j<pl.points.length; j++){
 				vt=pl.points[j];
 				if (!vt.tag){newpts.push(vt);lastadded=vt;}
 				else{
@@ -1475,28 +1642,39 @@ function cloneVertex(v){
 }
 function SeperateVertices(){
 	console.log("seperate vertices");
-	vertexPolyMap=new Map(); // every combination of poly,vertex
-	for (i=0;i<g_polys.length;i++){
+	var vertexPolyMap=new Map(); // every combination of poly,vertex
+	for (var i=0;i<g_polys.length;i++){
 		pl=g_polys[i];
-		for (j=0; j<pl.points.length;j++){
+		for (var j=0; j<pl.points.length;j++){
 			vt=pl.points[j];
-			// create or get a map for the vertex,
-			if (!vertexPolyMap.has(vt)) {
-				vertexPolyMap.set(vt,new Map());
-			}
-			polysPerVertex=vertexPolyMap.get(vt);
-			// put the poly's respective version on the vertex
-			polysPerVertex.set(pl,(!vt.tag)?vt: cloneVertex(vt));
+			if (vt.tag){
+				// create or get a map for the vertex,
+				if (!vertexPolyMap.has(vt)) {
+					vertexPolyMap.set(vt,new Map());
+				}
+				var polysPerVertex=vertexPolyMap.get(vt);
+				// put the poly's respective version on the vertex
+				polysPerVertex.set(pl,(!vt.tag)?vt: cloneVertex(vt));
 			// mark that the vertex has this poly
+			}
 		}
 	}
+	vertexPolyMap.forEach(function(val,keyvt,map){
+		console.log("vertex map - %d polys{",val.length);
+		val.forEach(function(val,keypl,map){
+			console.log("\tpoly %s",keypl.name);
+		});
+		console.log("}");
+	});
 	// pass 2 change whats needed
-	for (i=0;i<g_polys.length;i++){
+	for (var i=0;i<g_polys.length;i++){
 		pl=g_polys[i];
-		for (j=0; j<pl.points.length;j++){
+		for (var j=0; j<pl.points.length;j++){
 			vt=pl.points[j];
-			newvt=vertexPolyMap.get(vt).get(pl);
-			pl.points[j]=newvt;
+			if (vt.tag){
+				newvt=vertexPolyMap.get(vt).get(pl);
+				pl.points[j]=newvt;
+			}
 		}
 	}
 }
@@ -1504,10 +1682,10 @@ function SeperateVertices(){
 function DeleteVertices(){
 	console.log("delete vertices\n");
 	var newpls=[];
-	for (i=0;i<g_polys.length; i++){
+	for (var i=0;i<g_polys.length; i++){
 		var pl=g_polys[i];
 		var newpl={points:[],color:pl.color,name:pl.name};
-		for (j=0; j<pl.points.length; j++){
+		for (var j=0; j<pl.points.length; j++){
 			vt=pl.points[j];
 			if (!vt.tag){
 				newpl.points.push(vt);
@@ -1534,14 +1712,29 @@ function Delete(){
 	}
 }
 
-function foreachPolygonEdge(f){
-	for (i=0;i<g_polys.length; i++){
+function foreachPolygonEdgeSub(pls,f){
+	for (var i=0;i<g_polys.length; i++){
 		pl=g_polys[i];
-		for (j=0; j<pl.points.length; j++){
+		for (var j=0; j<pl.points.length; j++){
 			pt0=pl.points[j]; pt1=pl.points[(j+1)%pl.points.length];
 			f(pl,pt0,pt1);
 		}
+		if (pl.polygons){foreachPolygonEdgeSub(pl.polygons,f);}
 	}
+}
+function foreachPolygonEdge(pls,f){
+	foreachPolygonEdgeSub(g_polys,f);
+}
+
+function foreachPolygonSub(pls,f){
+	for (var i=0; i<pls.length; i++){
+		pl=pls[i];
+		f(pl);
+		if (pl.polygons){foreachPolygonSub(pl.polygons,f);}
+	}
+}
+function foreachPolygon(f){
+	foreachPolygonSub(g_polys,f);
 }
 
 function edgeMapGetOrInsert(edgeMap, vs,ve, f){
@@ -1604,9 +1797,9 @@ function edgeMapGetOrCreate(edgemap, vs,ve){
 function makeEdgeMap(){
 	// 
 	ptedges=new Map();
-	for (i=0; i<g_polys.length; i++){
+	for (var i=0; i<g_polys.length; i++){
 		pl=g_polys[i];
-		for(j=0; j<pl.points.length;j++){
+		for(var j=0; j<pl.points.length;j++){
 			var vs=pl.points[j];
 			var ve=pl.points[(j+1)%pl.points.length];
 			edgeMapLink(ptedges,vs,ve);
@@ -1634,7 +1827,7 @@ function PasteFromClipboard(){
 	console.log("paste/duplicate - no clipboard yet so we paste");
 	// todo: poly mode, vertex mode, edge mode
 	// or poly/vertex/edge mixed selection
-	g_currentPoly=-1;
+	g_currPoly=null;
 	selPolyMap=new Map();
 	selVertexMap=new Map();
 	foreachVertexOfPolygon(function(vt,pl){
@@ -1663,13 +1856,13 @@ function PasteFromClipboard(){
 	});
 	selPolyMap.forEach(function(val,keypl,map){
 		newpl={points:[],name:keypl.name, color:keypl.color};
-		for (i=0; i<keypl.points.length; i++){
+		for (var i=0; i<keypl.points.length; i++){
 			duplicateVt=selVertexMap.get(keypl.points[i]);
 			
 			newpl.points.push(duplicateVt);
 		}
 		g_polys.push(newpl);
-		g_currentPoly=g_polys.length-1;	// this is a  hack we will eliminate
+		g_currPoly=newpl;	// this is a  hack we will eliminate
 	});
 }
 
@@ -1694,7 +1887,7 @@ function SubdivideByVertices(){
 	//can't just use [vs,ve] as keys adhoc; must be unique [vs,ve] object
 	console.log("create midpoints & build edgemap:-");
 	edgeMidPts=new Map();
-	for (i=0; i<g_polys.length; i++){
+	for (var i=0; i<g_polys.length; i++){
 		pl=g_polys[i];
 		for(j=0; j<pl.points.length;j++){
 			var vs=pl.points[j];
@@ -1713,7 +1906,7 @@ function SubdivideByVertices(){
 		console.log("subdiv- poly "+pli+"of"+g_polys.length);
 		var pl=g_polys[pli];
 		var numTagged=0;
-		for (j=0; j<pl.points.length; j++){
+		for (var j=0; j<pl.points.length; j++){
 			if (pl.points[j].tag) {
 				numTagged+=1;
 			}
@@ -1740,7 +1933,7 @@ function SubdivideByVertices(){
 			// just subdivide edges
 			console.log("subdiv- poly edges");
 			newpl={points:[], name:pl.name,color:pl.color};
-			for (j=0; j<pl.points.length; j++){
+			for (var j=0; j<pl.points.length; j++){
 
 				var vs=pl.points[j];
 				var ve=pl.points[(j+1)%pl.points.length];
@@ -1780,7 +1973,9 @@ editor.addEventListener('mousedown',
 		if (isMultiSelect()){
 			multiSelectMouseDown(e);
 		} else {
-			g_tool.mousedown(e);
+			if (g_tool.mousedown){
+				g_tool.mousedown(e);
+			}
 		}
 		repaint();
 	}
@@ -1818,7 +2013,12 @@ editor.addEventListener('contextmenu',
     if (g_tool.contextmenu){
 	  g_tool.contextMenu(e);
       e.preventDefault();
-    } else {
+    } if (g_tool.mouserightclick){
+		g_tool.mouserightclick(e);
+      e.preventDefault();
+	}
+	else {
+	
 	  //g_contextMenu=mainContextMenu(e);
       //e.preventDefault();
 	}
@@ -1838,7 +2038,10 @@ window.addEventListener('keydown',  function(e){
   else if (kc==66){SetTool(g_octTool)}
   else if (kc==65){SetTool(g_adjustTool)}
   else if (kc==69){PushTool(g_extrudeTool)}
-  else if (kc==80){SetTool((g_ctrl||g_shift)?g_quadstripTool:g_polyTool)}
+  else if (kc==80){
+    if (g_ctrl){ SetTool(g_parentTool);}
+	else SetTool((g_shift)?g_quadstripTool:g_polyTool)
+  }
   else if (kc==83){
 	if (g_shift){
 		SeperateVertices();
@@ -1892,7 +2095,11 @@ var examples=[
 {"imageurl":"https://upload.wikimedia.org/wikipedia/commons/5/5f/Vendeur_de_parapluie.jpg","scaled_width":1024,"scaled_height":768,"polygons":[{"points":[{"x":641.2,"y":133},{"x":631,"y":123},{"x":616,"y":118},{"x":602,"y":119},{"x":592,"y":124},{"x":589,"y":137},{"x":573,"y":144.375},{"x":577,"y":153},{"x":592,"y":154},{"x":595,"y":170},{"x":579,"y":243},{"x":563,"y":281},{"x":586,"y":308},{"x":590,"y":340},{"x":592,"y":388},{"x":576,"y":397},{"x":575.8,"y":407},{"x":593,"y":420},{"x":627,"y":417},{"x":633,"y":370},{"x":629,"y":333},{"x":636,"y":306.625},{"x":644,"y":276},{"x":648,"y":255},{"x":655,"y":200},{"x":638,"y":169},{"x":630,"y":151},{"x":640,"y":148}],"name":"person","color":"#1000f0"},{"points":[{"x":454.655,"y":155},{"x":461,"y":137},{"x":479,"y":129},{"x":506,"y":151},{"x":540.375,"y":153},{"x":583,"y":210.5},{"x":576,"y":293},{"x":571,"y":335},{"x":558.345,"y":388},{"x":533,"y":380},{"x":540,"y":363},{"x":506,"y":370},{"x":495.625,"y":364},{"x":523,"y":344},{"x":524,"y":308.5},{"x":493,"y":273},{"x":497,"y":237},{"x":485,"y":186},{"x":463,"y":175}],"name":"person","color":"#1000f0"},{"points":[{"x":659,"y":205.215},{"x":667,"y":190},{"x":679,"y":185},{"x":689,"y":187},{"x":685,"y":175},{"x":693,"y":164},{"x":720,"y":171},{"x":713,"y":197},{"x":743,"y":200},{"x":748.75,"y":193},{"x":814,"y":185.625},{"x":814,"y":207},{"x":797,"y":208},{"x":800,"y":197},{"x":776,"y":202},{"x":772,"y":209},{"x":777,"y":222},{"x":796,"y":228},{"x":812,"y":250},{"x":819,"y":284},{"x":810,"y":311.785},{"x":799,"y":323},{"x":777,"y":326},{"x":750,"y":307},{"x":740,"y":273},{"x":731,"y":269},{"x":723,"y":279},{"x":709,"y":276},{"x":702,"y":289},{"x":687.25,"y":292},{"x":670,"y":285},{"x":659,"y":269.375},{"x":652,"y":238}],"name":"bicycle","color":"#008000"},{"points":[{"x":357,"y":244.605},{"x":378,"y":238},{"x":387,"y":236},{"x":398.75,"y":236},{"x":459,"y":256},{"x":483,"y":278},{"x":504,"y":285.875},{"x":515,"y":332.395},{"x":479,"y":330},{"x":430,"y":306},{"x":404.25,"y":344},{"x":401,"y":341.125},{"x":423,"y":302},{"x":403,"y":289},{"x":375,"y":268}],"name":"umbrella","color":"#008000"},{"points":[{"x":894.06,"y":82},{"x":886,"y":71},{"x":873.5,"y":73},{"x":867,"y":85},{"x":872,"y":99},{"x":868,"y":117.75},{"x":861,"y":128},{"x":840,"y":124},{"x":850,"y":138},{"x":865,"y":148},{"x":869,"y":176},{"x":860,"y":190},{"x":869,"y":191},{"x":879.94,"y":189},{"x":891,"y":182},{"x":886,"y":172},{"x":883.5,"y":153},{"x":903,"y":160.25},{"x":914,"y":145},{"x":913,"y":122},{"x":906,"y":104},{"x":893,"y":94}],"name":"person","color":"#1000f0"},{"points":[{"x":868.62,"y":112},{"x":854,"y":86},{"x":851,"y":76},{"x":841,"y":68},{"x":829,"y":75},{"x":825.5,"y":83},{"x":829,"y":100},{"x":825,"y":109},{"x":815,"y":123},{"x":803,"y":130.125},{"x":812,"y":137},{"x":812,"y":151},{"x":810,"y":163},{"x":795,"y":171},{"x":798.38,"y":180},{"x":818,"y":173},{"x":819,"y":181},{"x":835.5,"y":177},{"x":842,"y":154.875},{"x":842,"y":137},{"x":864,"y":122}],"name":"person","color":"#1000f0"},{"points":[{"x":383.165,"y":83},{"x":364,"y":75},{"x":358.125,"y":60},{"x":333,"y":79.875},{"x":347,"y":93},{"x":340,"y":105},{"x":339,"y":121},{"x":329,"y":128},{"x":332,"y":141},{"x":342,"y":156},{"x":342.835,"y":196},{"x":358,"y":243},{"x":376,"y":239},{"x":377,"y":209},{"x":388.875,"y":238},{"x":410,"y":237.125},{"x":395,"y":181},{"x":407,"y":137},{"x":397,"y":93}],"name":"person","color":"#1000f0"},{"points":[{"x":167.17,"y":79},{"x":191.25,"y":78},{"x":188,"y":97},{"x":195,"y":108.625},{"x":198,"y":137},{"x":212,"y":168},{"x":206.83,"y":176},{"x":173.75,"y":169},{"x":164,"y":157},{"x":155,"y":160},{"x":149,"y":136.375},{"x":150,"y":103},{"x":166,"y":93}],"name":"person","color":"#1000f0"},{"points":[{"x":899,"y":259.76},{"x":927,"y":255},{"x":954,"y":263},{"x":943,"y":224},{"x":991,"y":228},{"x":985,"y":278},{"x":1005,"y":278},{"x":1024,"y":281},{"x":1024,"y":343.24},{"x":998,"y":358},{"x":989,"y":378},{"x":975,"y":379},{"x":971,"y":389},{"x":968,"y":410},{"x":955,"y":413},{"x":935,"y":386},{"x":905,"y":377},{"x":883,"y":348},{"x":878,"y":312}],"name":"bicycle","color":"#008000"},{"points":[{"x":907,"y":209.715},{"x":932.25,"y":207},{"x":955,"y":213.125},{"x":948,"y":232},{"x":952,"y":256.285},{"x":910.75,"y":255},{"x":893,"y":245.875},{"x":894,"y":226}],"name":"food basket","color":"#008000"},{"points":[{"x":67.83500000000001,"y":225},{"x":87,"y":212},{"x":116,"y":217},{"x":109,"y":250},{"x":121,"y":247},{"x":133,"y":231},{"x":153,"y":231},{"x":180,"y":240},{"x":154,"y":268},{"x":193,"y":257},{"x":211,"y":244},{"x":228.875,"y":236},{"x":230,"y":250},{"x":191,"y":278},{"x":242,"y":338},{"x":240,"y":368},{"x":202,"y":402},{"x":295,"y":367},{"x":299,"y":372.375},{"x":285,"y":391},{"x":248,"y":409},{"x":217,"y":417},{"x":239,"y":447},{"x":271,"y":500},{"x":334.165,"y":661},{"x":216.125,"y":663},{"x":189,"y":613},{"x":167,"y":558},{"x":155,"y":501},{"x":144,"y":455},{"x":118,"y":476},{"x":114,"y":465},{"x":88,"y":474.625},{"x":86,"y":464},{"x":131,"y":438},{"x":130,"y":416},{"x":119,"y":400},{"x":76,"y":407},{"x":74,"y":401},{"x":34,"y":408},{"x":29,"y":392},{"x":84,"y":389},{"x":115,"y":376},{"x":110,"y":359},{"x":92,"y":313},{"x":45,"y":320},{"x":42,"y":306},{"x":75,"y":292},{"x":67,"y":270},{"x":73,"y":250}],"name":"parked bicycles","color":"#008000"}]}
 ];
 
-g_example1polys=[{"points":[{"x":824.75,"y":464.515,"tag":false},{"x":822.5,"y":437.405,"tag":false},{"x":802,"y":407.185,"tag":false},{"x":699.25,"y":410,"tag":false},{"x":673.125,"y":435.1875,"tag":false},{"x":623,"y":442.375,"tag":false},{"x":622.5,"y":471.095,"tag":false},{"x":640,"y":491.815,"tag":false},{"x":697.75,"y":493,"tag":false},{"x":801,"y":487.625,"tag":false}],"name":"SUV","color":"#ff0000"},{"points":[{"x":216,"y":510,"tag":false},{"x":367,"y":503,"tag":false}],"name":"kerb edge","color":"#c08000"},{"points":[{"x":502,"y":495,"tag":false},{"x":631,"y":488,"tag":false}],"name":"kerb edge","color":"#80c000"},{"points":[{"x":839,"y":354,"tag":false},{"x":836,"y":198,"tag":false}],"name":"lamp post","color":"#0080c0"},{"points":[{"x":479,"y":377.43,"tag":false},{"x":515.75,"y":357.21500000000003,"tag":false},{"x":551.5,"y":357,"tag":false},{"x":596,"y":376.25,"tag":false},{"x":608.75,"y":416.58},{"x":598.5,"y":441.90999999999997,"tag":false},{"x":564,"y":452.57,"tag":false},{"x":515.5,"y":455,"tag":false},{"x":485,"y":442.75,"tag":false}],"name":"bush","color":"#00ff00"},{"points":[{"x":322,"y":401}],"name":"head","color":"#00c080"},{"points":[{"x":276,"y":390}],"name":"head","color":"#8000c0"},{"points":[{"x":903,"y":428}],"name":"wing mirror","color":"#c08000"}];
+g_example1polys=[{"points":[{"x":824.75,"y":464.515,"tag":false},{"x":822.5,"y":437.405,"tag":false},{"x":802,"y":407.185,"tag":false},{"x":699.25,"y":410,"tag":false},{"x":673.125,"y":435.1875,"tag":false},{"x":623,"y":442.375,"tag":false},{"x":622.5,"y":471.095,"tag":false},{"x":640,"y":491.815,"tag":false},{"x":697.75,"y":493,"tag":false},{"x":801,"y":487.625,"tag":false}],"name":"SUV","color":"#ff0000",
+  polygons:[{"points":[{"x":696,"y":456,"tag":false},{"x":698,"y":455,"tag":false},{"x":715,"y":458,"tag":false},{"x":721,"y":467,"tag":false},{"x":720.5,"y":480.5,"tag":false},{"x":711,"y":492,"tag":false},{"x":692.75,"y":493,"tag":false},{"x":685,"y":481,"tag":false},{"x":684,"y":466,"tag":false}],"name":"wheel","color":"#80c000"}]
+
+
+},{"points":[{"x":216,"y":510,"tag":false},{"x":367,"y":503,"tag":false}],"name":"kerb edge","color":"#c08000"},{"points":[{"x":502,"y":495,"tag":false},{"x":631,"y":488,"tag":false}],"name":"kerb edge","color":"#80c000"},{"points":[{"x":839,"y":354,"tag":false},{"x":836,"y":198,"tag":false}],"name":"lamp post","color":"#0080c0"},{"points":[{"x":479,"y":377.43,"tag":false},{"x":515.75,"y":357.21500000000003,"tag":false},{"x":551.5,"y":357,"tag":false},{"x":596,"y":376.25,"tag":false},{"x":608.75,"y":416.58},{"x":598.5,"y":441.90999999999997,"tag":false},{"x":564,"y":452.57,"tag":false},{"x":515.5,"y":455,"tag":false},{"x":485,"y":442.75,"tag":false}],"name":"bush","color":"#00ff00"},{"points":[{"x":322,"y":401}],"name":"head","color":"#00c080"},{"points":[{"x":276,"y":390}],"name":"head","color":"#8000c0"},{"points":[{"x":903,"y":428}],"name":"wing mirror","color":"#c08000"}];
 g_polys=g_example1polys;
 repaint();
 
