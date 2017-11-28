@@ -32,6 +32,7 @@ document.getElementById("help").onclick=function(){alert(
 "drag drop image URL to begin annotating an image\n"+
 "ctrl-v\tduplicate selected poly at cursor\n"+
 "cursorkeys,-+\tscroll,zoom\n"+
+"f\treset view (show all)\n"+
 "\n"+
 "Advanced:-\n"+
 "t\tmulti select tool-'tags' (points, rect-drag)\n"+
@@ -145,6 +146,14 @@ var g_viewMode=0;
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
 
+function frameImage(){
+  g_zoom = Math.min(editor.width/g_imageWorldSize.x,editor.height/g_imageWorldSize.y);
+  //want worldToScreen(viewCentre)=screenCentre
+  //
+//  g_viewCentre=vfromxyz(0,0,0);
+  g_viewCentre=vfromxyz(g_imageWorldSize.x/2,g_imageWorldSize.y/2,0);
+
+}
 g_img.onload=function(){
   console.log("image.onload");
   //scale to the image and the window on loading
@@ -152,11 +161,7 @@ g_img.onload=function(){
   editor.height=window.innerHeight;
 
   g_imageWorldSize=vfromxyz(g_img.width,g_img.height,0);
-  g_zoom = Math.min(editor.width/g_imageWorldSize.x,editor.height/g_imageWorldSize.y);
-  //want worldToScreen(viewCentre)=screenCentre
-  //
-//  g_viewCentre=vfromxyz(0,0,0);
-  g_viewCentre=vfromxyz(g_imageWorldSize.x/2,g_imageWorldSize.y/2,0);
+  frameImage();
   this.ready=true;
   repaint();  
 }
@@ -177,6 +182,9 @@ if (urlgadget){
 }
 // mini maths lib
 function vaddto(lhs,rhs){lhs.x+=rhs.x;lhs.y+=rhs.y; lhs.z+=rhs.z;}
+function vsubto(lhs,rhs){lhs.x-=rhs.x;lhs.y-=rhs.y; lhs.z-=rhs.z;}
+function vmaddto(lhs,rhs,f){lhs.x+=rhs.x*f;lhs.y+=rhs.y*f; lhs.z+=rhs.z*f;}
+function vneg(v){return {x:-v.x, y:-v.y, z:-v.z};};
 function vadd(lhs,rhs){return {x:lhs.x+rhs.x, y:lhs.y+rhs.y, z:lhs.z+rhs.z};}
 function vmulElem(lhs,rhs){return {x:lhs.x*rhs.x, y:lhs.y*rhs.y, z:lhs.z*rhs.z};}
 function vsumElem(a){return a.x+a.y+a.z;}
@@ -271,6 +279,13 @@ function worldToScreen(view, rwpos){
 	wpos=vchooseAxes(vsub(rwpos,view.interestPoint),view.axis);
 	return vadd(view.screenCentre,vscale(wpos,view.zoom));
 //	return vscale(vadd(wpos,view.interestPoint),view.zoom);
+}
+function viewIs2d(vw){
+//	console.log("vw="+JSON.stringify(vw));
+	if (vw.axis==2 || vw.axis==3|| vw.axis==0){
+		return true;
+	}
+	return false;
 }
 function screenToWorld(view, rspos){
 	var spos={};
@@ -1016,7 +1031,7 @@ function drawPolygons(context,vp,polys,parent,sel){
       context.lineTo(pos.x,pos.y+g_snapRadius*2);
       context.stroke();
     }
-    else{
+    else if  (pl.points.length>1){
 	    vctMoveTo(vct,pl.points[pl.points.length-1]);
 		for (var j=0; j<pl.points.length; j++) { // it's a prpper poly.
 			vctLineTo(vct,pl.points[j]);
@@ -1073,7 +1088,7 @@ function ToggleCurrentPoly(dir){
 }
 
 function SetCursor(type){
-	editor.style.cursor=type;//"url(crosshair.png), auto";
+//	editor.style.cursor=type;//"url(crosshair.png), auto";
 }
 // rectangular-drag creation tools -
 // several variations for different actual shapes
@@ -1827,6 +1842,18 @@ editor.addEventListener('mousemove',function(e){
 	repaint();
 });
 
+editor.addEventListener("wheel", function(e){
+	console.log("mouse wheel event"+JSON.stringify(e)+e.deltaY);
+	var factor=1.0;
+	if (e.deltaY>0){ factor=1.08;
+	} else if (e.deltaY<0){
+		factor=1.0/1.08;
+	}
+	ZoomByAt(viewCursor(),factor);
+	repaint();
+});
+
+
 function removeFromArray(as,a){
 	for (var i=0; i<as.length; i++){
 		if (as[i]===a){
@@ -2319,6 +2346,14 @@ function isCommandModifier(e){
 	return (g_ctrl || e.getModifierState("OS"));
 }
 
+function FrameAll(){
+	if (g_img){
+		console.log("framing image\n");
+		frameImage();
+	} else{
+		console.log("TODO: frame current meshes\n");
+	}
+}
 
 editor.addEventListener('contextmenu',
   function(e) {
@@ -2337,6 +2372,18 @@ editor.addEventListener('contextmenu',
   },
   false
 );
+
+function ZoomByAt(vc, factor){
+	// todo: in 2d views, 'zoom at point'
+	var ofs=vsub(vc.worldpos, g_viewCentre);
+//	vaddto(g_viewCentre,ofs);
+	g_zoom*=factor;
+
+//	console.log("vc="+JSON.stringify(vc));
+	if (viewIs2d(vc.view)){
+		vmaddto(g_viewCentre,ofs,-1+factor);
+	}
+}
 
 window.addEventListener('keydown',  function(e){
   kc=e.keyCode;
@@ -2362,8 +2409,6 @@ window.addEventListener('keydown',  function(e){
   }
   //i
   else if (kc==73){}
-  //f
-  else if (kc==70){}
   //d
   else if (kc==68){}
   //h
@@ -2392,8 +2437,10 @@ window.addEventListener('keydown',  function(e){
   }
   else if (kc==190){ToggleCurrentPoly(+1);}
   else if (kc==8){Delete(+1);}
-  else if (kc==187){g_zoom*=1.2;}
-  else if (kc==189){g_zoom/=1.2;}
+  else if (kc==187){ZoomByAt(viewCursor(),1.2);}
+  else if (kc==189){ZoomByAt(viewCursor(),1.0/1.2);}
+
+  if (kc==70){console.log("pressed f");FrameAll();}
 
   var step=40.0;
   var vp=getViewport(g_mousePos);
