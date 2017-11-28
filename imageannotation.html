@@ -128,7 +128,7 @@ var g_currentPolyOutline="#ffffff";
 var g_promptSevereTools=true;
 var g_shiftIsMultiSelect=true;
 var g_mousePos={};
-var g_dragstart={};
+var g_dragstart=null;
 var g_drawfeedback=null;
 var g_polys=[];
 var g_tool;
@@ -546,15 +546,17 @@ function dragFeedbackLine(context){
 	var vc=viewCursor();
 //	var vct=viewContext(context,vc.view);
 	var vct={context:context, view:vc.view};
-
-    context.globalAlpha=0.75;
-    context.strokeStyle = "red";
-    context.beginPath();
-    context.moveTo(g_dragstart.x,g_dragstart.y);
-    var endpoint=getSnappedRefPoint(viewCursor());
-    vctLineTo(vct,endpoint);
-    context.stroke();
-    drawPointSnapCrosshair(context,vc);
+	console.log("dfbl");
+	if (g_dragstart){
+		context.globalAlpha=0.75;
+		context.strokeStyle = "red";
+		context.beginPath();
+		context.moveTo(g_dragstart.x,g_dragstart.y);
+		var endpoint=getSnappedRefPoint(viewCursor());
+		vctLineTo(vct,endpoint);
+		context.stroke();
+		drawPointSnapCrosshair(context,vc);
+	}
 }
 
 function cursorScreenDistSquared(viewcursor, worldpoint){
@@ -1121,11 +1123,13 @@ function makeRectToolVariant(polyCreateFn,txt){
         g_drawfeedback=dragFeedbackCrosshairFull;
 	},
     mouseup:function(e){
-        newrect={start:g_dragstart,end:g_mousePos,name: getCurrentLabel()};
-    
-        if (distSquared2d(g_dragstart,g_mousePos)>0){
-          AddPoly(polyCreateFn(viewCursor().view,newrect));
-        }
+		if (g_dragstart){
+			newrect={start:g_dragstart,end:g_mousePos,name: getCurrentLabel()};
+
+			if (distSquared2d(g_dragstart,g_mousePos)>0){
+			  AddPoly(polyCreateFn(viewCursor().view,newrect));
+			}
+		}
         g_drawfeedback=dragFeedbackCrosshairFull;
     }
   }
@@ -1175,33 +1179,56 @@ g_parentTool={
 		console.log("done");
 	}
 };
-
+function lastIsNot(array,x){
+	if (array.length==0) {return true;}
+	return (array[array.length-1]!=x);
+}
 g_dragLineTool={
   name:"draw edges",
   activate: function(e){
      g_drawfeedback=dragFeedbackCrosshair;
+	 g_drawingPoly=[];
 	 SetCursor("crosshair");
 	 return true;
   },
 
   mousedown: function(e){
-      g_drawfeedback=dragFeedbackLine;
+      g_drawfeedback=drawFeedbackDrawPoly;
+//	  g_dragstart=cloneVertex(g_mousePos);
   },
+  
   mouseclickup:function(e){
+	console.log("drawline mouse click up");
+//	g_dragstart=null;	// cancel drag.
+	var ept=pickOrMakePoint(viewCursor());
+	if (g_drawingPoly.length){
+		if (vdistSquared(g_drawingPoly[g_drawingPoly.length-1],ept)<0.00001)
+			return;
+	}
+	g_drawingPoly.push(ept);
+	if (g_drawingPoly.length==2){
+		AddPoly({points:[g_drawingPoly[0],g_drawingPoly[1]], name:getCurrentLabel()});
+		// todo - linestrip mode.. right-click??
+		g_drawingPoly=[];
+	}
+/*	  if (g_dragstart){
+	      if (distSquared2d(g_mousePos,g_dragstart)>0){
+		    vstart=pickOrMakePoint(viewCursorAt(g_dragstart));
+			vend=pickOrMakePoint(viewCursor());
+	        AddPoly({points:[vstart,vend], name:getCurrentLabel()});
+		  }
+		  t
+		}
+*/
+		//g_drawfeedback=dragFeedbackCrosshair;
   },
   mouseup:function(e){
+	g_drawingPoly=[];
       
-      //newline={start:g_dragstart,end:g_mousePos};
-      // only issue if there is length.
-      if (distSquared2d(g_mousePos,g_dragstart)>0){
-        vstart=pickOrMakePoint(viewCursorAt(g_dragstart));
-        vend=pickOrMakePoint(viewCursor());
-        AddPoly({points:[vstart,vend], name:getCurrentLabel()});
-      }
-      g_drawfeedback=dragFeedbackCrosshair;
   },
   cancel:function(){
-      g_dragstart=g_mousePos;
+      g_dragstart=null;//g_mousePos;
+		g_drawingPoly=[];
       g_drawfeedback=dragFeedbackCrosshair;
   }
 };
@@ -1236,7 +1263,7 @@ g_polyTool=makeDrawToolVariant(
 		console.log("add poly point");
 		if (g_drawingPoly.length>2){
 			if (cursorScreenDistSquared(viewCursor(),g_drawingPoly[0])<sqr(g_snapRadius)){
-				console.log("finish poly");
+				console.log("finish poly by click");
 				AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
 				g_drawingPoly=[];
 				return;
@@ -1245,6 +1272,7 @@ g_polyTool=makeDrawToolVariant(
 		g_drawingPoly.push(pickOrMakePoint(viewCursor()));
 	},
 	function(e){
+		console.log("finish poly by rclick");
 		g_drawingPoly.push(pickOrMakePoint(viewCursor()));
 		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
 		g_drawingPoly=[];
@@ -1499,22 +1527,22 @@ g_extrudeTool={
 
 g_multiSelectDrag=false;
 function multiSelectMouseMove(e) {
-	console.log("multi select mouse move,tool=",g_tool.name);
+//	console.log("multi select mouse move,tool=",g_tool.name);
 	g_drawfeedback=dragFeedbackSelectRect;
 }
 function multiSelectPassiveMouseMove(e) {
-	console.log("multi select mouse move,tool=",g_tool.name);
+//	console.log("multi select mouse move,tool=",g_tool.name);
 	g_drawfeedback=dragFeedbackMultiSelect;
 }
 function inrange(a,lo,hi){return a>=lo && a<=hi;}
 
 function multiSelectMouseClickUp(e){
-	console.log("multiselect mouse click up");
+//	console.log("multiselect mouse click up");
 	multiSelectTagPoint(e);
 	g_multiSelectDrag=false;
 }
 function multiSelectMouseDragUp(e){
-	console.log("multi select mouse drag up\n");
+//	console.log("multi select mouse drag up\n");
 	var selectedVertices=new Map();
 	foreachVertex(function(v){selectedVertices.set(v,true);});
 	vc=viewCursor();
@@ -1565,7 +1593,7 @@ function multiSelectTagPoint(e){
 		}
 	}
 */	if (pt){
-        console.log("MSMD tag a point..\n");
+//        console.log("MSMD tag a point..\n");
 		pt.tag=(pt.tag)?false:true;
 	}
 }
@@ -2380,19 +2408,25 @@ editor.addEventListener('mousedown',
 	
 		g_leftmousebutton=true;
 		readMousePos(e);
-		g_dragstart=g_mousePos;
+		if (e.button==2){
+			e.preventDefault();
+		} else {
+			// lbutton
+			g_dragstart=cloneVertex(g_mousePos);
 
 		// todo - inherit shift-overide in the tool func?
-		if (isMultiSelect()){
-			multiSelectMouseDown(e);
-		} else {
-			if (g_tool.mousedown){
-				g_tool.mousedown(e);
+			if (isMultiSelect()){
+				multiSelectMouseDown(e);
+			} else {
+				if (g_tool.mousedown){
+					g_tool.mousedown(e);
+				}
 			}
 		}
 		repaint();
 	}
 );
+g_dragLineDragging=false; // temp hack, fugly.
 editor.addEventListener('mouseup',   function(e){
 	g_leftmousebutton=false;
 	readMousePos(e);
@@ -2400,6 +2434,12 @@ editor.addEventListener('mouseup',   function(e){
 //		multiSelectMouseDragUp(e);
 //	}else
 //	{
+	if (e.button==2){
+		if (g_tool.mouserightclick){
+			g_tool.mouserightclick(e);
+			e.preventDefault();
+		}
+	} else{
 		// tools can distinguish drag-release from click-release
 		if (distSquared2d(g_dragstart,g_mousePos)>0){
 			if (isMultiSelect() || g_multiSelectDrag){
@@ -2414,7 +2454,7 @@ editor.addEventListener('mouseup',   function(e){
 				g_tool.mouseclickup(e);
 			}
 		}
-//	}
+	}
 	g_multiSelectDrag=false;
 	repaint();
 });
@@ -2440,13 +2480,15 @@ function FrameAll(){
 
 editor.addEventListener('contextmenu',
   function(e) {
+	e.preventDefault();
     if (g_tool.contextmenu){
 	  g_tool.contextMenu(e);
       e.preventDefault();
-    } if (g_tool.mouserightclick){
-		g_tool.mouserightclick(e);
-      e.preventDefault();
-	}
+    }
+//	if (g_tool.mouserightclick){
+//		g_tool.mouserightclick(e);
+ //     e.preventDefault();
+//	}
 	else {
 	
 	  //g_contextMenu=mainContextMenu(e);
