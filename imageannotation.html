@@ -20,7 +20,7 @@ tool:
 <button class="button" id="info">info</button>
 
 <div id="presetArea">
-<canvas id="editor" width="1920" height="1080">
+<canvas id="editor" width="100pc" height="100pc">
 </canvas>
 <script>
 
@@ -138,13 +138,24 @@ var g_hackMoveTaggedVertices=false;
 var g_view={centre:{x:0,y:0,z:0},scale:1.0};
 var g_viewCentre={x:editor.width/2,y:editor.height/2,z:0};
 var g_zoom=1.0;
+var g_imageWorldSize={x:1,y:1,z:0};
+var g_views=1;
 // default image to load..
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
 
 g_img.onload=function(){
   console.log("image.onload");
-  g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
+  //scale to the image and the window on loading
+  editor.width=window.innerWidth;
+  editor.height=window.innerHeight;
+
+  g_imageWorldSize=vfromxyz(g_img.width,g_img.height,0);
+  g_zoom = Math.min(editor.width/g_imageWorldSize.x,editor.height/g_imageWorldSize.y);
+  //want worldToScreen(viewCentre)=screenCentre
+  //
+//  g_viewCentre=vfromxyz(0,0,0);
+  g_viewCentre=vfromxyz(g_imageWorldSize.x/2,g_imageWorldSize.y/2,0);
   this.ready=true;
   repaint();  
 }
@@ -164,12 +175,12 @@ if (urlgadget){
   } 
 }
 // mini maths lib
-function vaddto(lhs,rhs){lhs.x+=rhs.x;lhs.y+=rhs.y;}
+function vaddto(lhs,rhs){lhs.x+=rhs.x;lhs.y+=rhs.y; lhs.z+=rhs.z;}
 function vadd(lhs,rhs){return {x:lhs.x+rhs.x, y:lhs.y+rhs.y, z:lhs.z+rhs.z};}
 function vmulElem(lhs,rhs){return {x:lhs.x*rhs.x, y:lhs.y*rhs.y, z:lhs.z*rhs.z};}
 function vsumElem(a){return a.x+a.y+a.z;}
 function vsub(lhs,rhs){return {x:lhs.x-rhs.x, y:lhs.y-rhs.y, z:lhs.z-rhs.z};}
-function vabs(v){return {x:Math.abs(v.x), y:Math.abs(v.y)}; }
+function vabs(v){return {x:Math.abs(v.x), y:Math.abs(v.y), z:Math.abs(v.z)}; }
 function vfromxy(vx,vy){return {x:vx,y:vy,z:0};}
 function vfromxyz(vx,vy,vz){return {x:vx, y:vy, z:vz};}
 function lerp(a,b,f){return (b-a)*f+a;}
@@ -210,23 +221,59 @@ function vaverage(a,b){
   return {x:(a.x+b.x)/2, y:(a.y+b.y)/2, z:(a.z+b.z)/2}
 }
 
+//  var canvas = document.querySelector("canvas");
+//  var context = canvas.getContext("2d");
+//  context.canvas.width  =window.innerWidth;
+//  context.canvas.height =window.innerHeight;
 
-var g_width = editor.width;
-var g_height = editor.height;
-var g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
+var g_width = window.innerWidth;
+var g_height = window.innerHeight;
+//var g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
 
 function lerp(a,b,f){
    return (b-a)*f+a;
 }
 // transformations
+g_axisName=["XZ","ISO","XY","ZY"];
+function vchooseAxes(rwpos,axis){
+	if (axis==1){//pixelart isometric..
+		return {
+			x:rwpos.x+rwpos.z,
+			y:rwpos.y+(rwpos.x-rwpos.z)/2,
+			z:(rwpos.z-rwpos.x)/2};
+	}
+	if (axis==2){
+		return{x:rwpos.x, y:rwpos.y, z:rwpos.z}
+	} else if (axis==3){
+		return{x:rwpos.z, y:rwpos.y, z:rwpos.x}
+	} else if (axis==0){
+		return{x:rwpos.x, y:rwpos.z, z:rwpos.y}
+	}
+}
+function vchooseAxesInv(rwpos,axis){
+	if (axis==2){
+		return{x:rwpos.x, y:rwpos.y, z:rwpos.z}
+	} else if (axis==3){
+		return{x:rwpos.z, y:rwpos.y, z:rwpos.x}
+	
+	} else if (axis==0 ||1){
+		return{x:rwpos.x, y:rwpos.z, z:rwpos.y}
+	}
+	//todo - inv iso axis
+}
 
-function worldToScreen(view, wpos){
+function worldToScreen(view, rwpos){
 //	console.log(JSON.stringify(view));
-	return vadd(vscale(vsub(wpos,view.interestPoint),view.zoom),view.screenCentre);
+	var wpos={};
+	wpos=vchooseAxes(vsub(rwpos,view.interestPoint),view.axis);
+	return vadd(view.screenCentre,vscale(wpos,view.zoom));
 //	return vscale(vadd(wpos,view.interestPoint),view.zoom);
 }
-function screenToWorld(view, spos){
-	return vadd(vscale(vsub(spos,view.screenCentre),1.0/view.zoom),view.interestPoint);
+function screenToWorld(view, rspos){
+	var spos={};
+	spos=vchooseAxes(vsub(rspos,view.screenCentre),view.axis);
+
+	return vadd(view.interestPoint,vscale(spos,1.0/view.zoom));
 //	return vsub(vscale(spos,view.zoom),view.interestPoint);
 }
 
@@ -435,14 +482,31 @@ function getSnappedRefPoint(viewcursor){
    vt=pickPointAt(viewcursor);
    return vt?vt:viewcursor.worldpos;
 }
-function getViewport(spos){
+function makeDefaultViewport(){
 	//todo - transform matrix.
 	// interim.. window bounds, centre,scale
 	return {
+		axis:2,
+		hasImage:true,
+		screenMin:{x:0,y:0,z:0},
+		screenSize:{x:g_width,y:g_height,z:0},
 		screenCentre:vfromxyz(g_width*0.5,g_height*0.5),
 		zoom:g_zoom,
 		interestPoint:g_viewCentre
 	}
+}
+function getViewport(spos){
+	var vps=getViewportList();
+	//reverse order - handle overlays
+	for (var i=vps.length-1;i>0; i--){
+		var vp=vps[i];
+		
+		if (spos.x>vp.screenMin.x && spos.x<(vp.screenMin.x+vp.screenSize.x) &&
+		spos.y>vp.screenMin.y && spos.y<(vp.screenMin.y+vp.screenSize.y)){
+			return  vp;
+		}
+	}
+	return vps[0];
 }
 function viewCursorAt(spos){
 	var vp=getViewport(spos);
@@ -737,9 +801,53 @@ function drawHrc(context,x,y,polys){
 	return y;
 }
 
-function repaint() {
+function getViewportList(){
+	if (g_views==1){
+		return [makeDefaultViewport()];
+	}
+	else{
+		var vp=makeDefaultViewport();
+		var sOfs=vfromxyz(g_width/4,g_height/4,0);
+		var smin=vfromxyz(0,0,0);
+		var smax=vfromxyz(g_width,g_height,0);
+		var vps=[];
+		for (var i=0; i<4; i++){
+			
+			var si=i&1;
+			var sj=(i|0)>>1;
+
+			var vpsub=makeDefaultViewport();
+
+			vpsub.axis=i;
+			vpsub.hasImage = (vpsub.axis==2)?true:false;
+
+			vpsub.screenSize={x:smax.x/2,y:smax.y/2,z:0};
+			vpsub.screenMin={x:si*(smax.x/2),y:sj*(smax.y/2),z:0};
+			vpsub.screenCentre=vadd(vpsub.screenMin,sOfs);
+			vpsub.zoom*=0.5;
+			vps.push(vpsub);
+		}
+		return vps;
+	}
+
+}
+
+function repaint(){
   var canvas = document.querySelector("canvas");
   var context = canvas.getContext("2d");
+  context.canvas.width  =window.innerWidth;
+  context.canvas.height =window.innerHeight;
+  var vps=getViewportList();
+	for (var i=0; i<vps.length; i++){
+		repaintView(context,vps[i]);
+	}
+}
+
+function repaintView(context,vp) {
+	context.save();
+	context.rect(vp.screenMin.x,vp.screenMin.y, vp.screenSize.x,vp.screenSize.y);
+	context.stroke();
+	context.clip();
   if (!g_img.ready) {
     
     context.font = "20px Arial";
@@ -747,20 +855,33 @@ function repaint() {
 
     return;
   }
-//draw background
-	vp=getViewport(g_mousePos);
-  context.globalAlpha=1.0;
-  var img=g_img;
+//draw backgrounda
+	context.globalAlpha=1.0;
+	var img=g_img;
   //todo- transform and clip the image..
   var imgMin=vfromxyz(0,0,0);
-  var imgMax=vfromxyz(g_scaled_w,g_scaled_h,0);
+  var imgMax=g_imageWorldSize;//vfromxyz(g_scaled_w,g_scaled_h,0);
   var sImgMin=worldToScreen(vp,imgMin);
   var sImgMax=worldToScreen(vp,imgMax);
   var sSize=vsub(sImgMax,sImgMin);
-  context.fillStyle="#808080"
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(img,0,0,img.width,img.height,
-	sImgMin.x,sImgMin.y, sSize.x, sSize.y);
+  context.fillStyle="#808080";
+  context.clearRect(0, 0, vp.screenSize.x, vp.screenSize.y);
+  if (vp.hasImage){
+	  context.drawImage(img,0,0,img.width,img.height,
+		sImgMin.x,sImgMin.y, sSize.x, sSize.y);
+	}
+ // draw world axes..
+   var vct={context:context,view:vp};
+   context.globalAlpha=0.25;
+   context.strokeStyle="#000000"
+   context.beginPath();
+   vctMoveTo(vct, vfromxyz(0,-10000.0,0.0));
+   vctLineTo(vct, vfromxyz(0,10000.0,0.0));
+   vctMoveTo(vct, vfromxyz(10000.0,0.0,0.0));
+   vctLineTo(vct, vfromxyz(-10000.0,0.0,0.0));
+   vctMoveTo(vct, vfromxyz(0,0, 10000.0));
+   vctLineTo(vct, vfromxyz(0,0, -10000.0));
+   context.stroke();
 
 //  if (g_currentPoly>g_polys.length){currentPoly=-1;}
   drawPolygons(context,vp,g_polys,null,false);
@@ -779,8 +900,10 @@ function repaint() {
 	
 	g_cursorTxt=null;
   }
+	context.fillText(g_axisName[vp.axis],vp.screenMin.x+15,vp.screenMin.y+15);
 
   drawStatusInfo(context);
+  context.restore();
 }
 
 function drawPolygons(context,vp,polys,parent,sel){
@@ -1270,7 +1393,7 @@ function extrudeTaggedVertices(){
 }
 
 function screenDeltaToWorld(vc,ofs){
-	return vscale(ofs,1.0/vc.view.zoom);
+	return vscale(vchooseAxesInv(ofs,vc.view.axis),1.0/vc.view.zoom);
 }
 //todo - in perspective views, account for dist ..
 function screenDeltaToWorldAt(vc,screenDelta /*, atWorldPos*/){
@@ -1528,8 +1651,8 @@ function download(filename, text) {
 function GetAsJSON(){
   return JSON.stringify(
    { imageurl:      g_img.src,//document.getElementById("imageurl").value,
-     scaled_width:  g_scaled_w,
-     scaled_height: g_scaled_h,
+     scaled_width:  g_imageWorldSize.x,
+     scaled_height: g_imageWorldSize.y,
      polygons:      g_polys
    });
 }
@@ -2101,6 +2224,9 @@ function SubdivideByVertices(){
 	console.log("subdiv- done");
 	g_polys=newPolyList;
 }
+function ViewToggle(){
+	g_views^=(1^4);
+}
 function isMultiSelect(){
 	return (g_shift && g_shiftIsMultiSelect);
 }
@@ -2205,7 +2331,7 @@ window.addEventListener('keydown',  function(e){
   //c
   else if (kc==67){if (isCommandModifier(e)) {CopyToClipboard()}}
   //v
-  else if (kc==86){if (isCommandModifier(e)) {PasteFromClipboard()}}  
+  else if (kc==86){if (isCommandModifier(e)) {PasteFromClipboard()} else {ViewToggle();}}  
   //z
   else if (kc==90){}
 
@@ -2226,9 +2352,13 @@ window.addEventListener('keydown',  function(e){
   else if (kc==189){g_zoom/=1.2;}
 
   var step=40.0/g_zoom;
-  vaddto(g_viewCentre,vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step,0));
+  var vp=getViewport(g_mousePos);
+  var sdelta=vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step,0);
+  vaddto(g_viewCentre,screenDeltaToWorld({cursor:g_mousePos,view:vp},sdelta));
 // todo .. parenting, renaming , delete vertex,...
   //readMousePos(e);
+  console.log("interestpoint="+JSON.stringify(g_viewCentre));
+	console.log("in scre"+JSON.stringify(vp));
   repaint();
 },false);
 
