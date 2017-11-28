@@ -40,6 +40,7 @@ document.getElementById("help").onclick=function(){alert(
 "m\tMerge tagged vertices\n"+
 "shift-s\tseperate merged vertices\n"+
 "e\textrude tagged edges/polys\n"+
+"v\ttoggle views (main,nav,3d)\n"+
 "ctrl-p\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
 "'tag' here means 'selected'\n"
 )
@@ -135,11 +136,11 @@ var g_showVertices=true;
 var g_selectedColor="white";
 var g_labelColor="white";
 var g_hackMoveTaggedVertices=false;
-var g_view={centre:{x:0,y:0,z:0},scale:1.0};
-var g_viewCentre={x:editor.width/2,y:editor.height/2,z:0};
+var g_view=null;
+var g_viewCentre=vfromxyz(editor.width/2,editor.height/2,0);
 var g_zoom=1.0;
-var g_imageWorldSize={x:1,y:1,z:0};
-var g_views=1;
+var g_imageWorldSize=vfromxyz(1,1,0);
+var g_viewMode=0;
 // default image to load..
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
@@ -192,7 +193,7 @@ function vaxisx(){return {x:1,y:0,z:0}}
 function vaxisy(){return {x:0,y:1,z:0}}
 function vaxisz(){return {x:0,y:0,z:1}}
 function vone(){return {x:1,y:1,z:1}}
-function vsplat(s){return {x:x,y:s,z:s}}
+function vsplat(s){return {x:x, y:s, z:s}}
 function vmax(a,b){return {x:Math.max(a.x,b.x), y:Math.max(a.y,b.y), z:Math.max(a.z,b.z)}}
 function vmin(a,b){return {x:Math.min(a.x,b.x), y:Math.min(a.y,b.y), z:Math.min(a.z,b.z)}}
 
@@ -247,19 +248,21 @@ function vchooseAxes(rwpos,axis){
 	} else if (axis==3){
 		return{x:rwpos.z, y:rwpos.y, z:rwpos.x}
 	} else if (axis==0){
-		return{x:rwpos.x, y:rwpos.z, z:rwpos.y}
+		return{x:rwpos.x, y:-rwpos.z, z:rwpos.y}
 	}
 }
-function vchooseAxesInv(rwpos,axis){
+function vchooseAxesInv(src,axis){
 	if (axis==2){
-		return{x:rwpos.x, y:rwpos.y, z:rwpos.z}
-	} else if (axis==3){
-		return{x:rwpos.z, y:rwpos.y, z:rwpos.x}
+		return{x:src.x, y:src.y, z:src.z};
+	} else if (axis==3) {
+		return{x:src.z, y:src.y, z:src.x};
 	
-	} else if (axis==0 ||1){
-		return{x:rwpos.x, y:rwpos.z, z:rwpos.y}
+	} else if (axis==0) {
+		return{x:src.x, y:src.z, z:-src.y};
+	} else if (axis==1) {
+		return{x:src.x*0.5, y:src.y, z:src.x*0.5};
 	}
-	//todo - inv iso axis
+	//todo - use matrices!
 }
 
 function worldToScreen(view, rwpos){
@@ -311,7 +314,7 @@ function polyDiagonalHexFromRect(view,rc) {
   if (width > height) { // wider than tall - split horiz
      return {
       points:screenPointsToWorld(view,[
-        vfromxyz(x0,lerp(y0,y1,fyy,	z)),
+        vfromxyz(x0,lerp(y0,y1,fyy), z),
         vfromxyz(lerp(x0,x1,fx),y0,	z),
         vfromxyz(x1,   lerp(y0,y1,fy),	z),
         vfromxyz(x1,   lerp(y1,y0,fyy),	z),
@@ -436,7 +439,7 @@ function drawRectOutline(context,start,end){
   context.stroke();
 }
 function dragFeedbackCrosshairFull(context){
-  drawCrosshairFull(context,g_mousePos);
+  drawCrosshairFull(context,viewCursor());
 }
 function drawPointSnapCrosshair(ctx,viewcursor){
   vt=pickPointAt(viewcursor);
@@ -474,7 +477,7 @@ function dragFeedbackSelectRect(context){
 	}
 }
 function dragFeedbackMultiSelect(context){
-	drawCrosshairFull(context,g_mousePos);
+	drawCrosshairFull(context,viewCursor());
 	drawFeedbackPickPolyPoint(context);
 }
 
@@ -488,9 +491,10 @@ function makeDefaultViewport(){
 	return {
 		axis:2,
 		hasImage:true,
-		screenMin:{x:0,y:0,z:0},
-		screenSize:{x:g_width,y:g_height,z:0},
-		screenCentre:vfromxyz(g_width*0.5,g_height*0.5),
+		screenMin:{x:0, y:0, z:0},
+		screenSize:{x:g_width, y:g_height, z:0},
+		screenMax:{x:g_width, y:g_height, z:0},
+		screenCentre:vfromxyz(g_width*0.5, g_height*0.5, 0.0),
 		zoom:g_zoom,
 		interestPoint:g_viewCentre
 	}
@@ -723,25 +727,27 @@ function drawFeedbackPickPolyPoint(ctx) {
 }
 function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
-	var pt = pickPointAt(viewCursor());
+	var vc=viewCursor();
+	var pt = pickPointAt(vc);
 	if (pt){
 		var spos=worldToScreen(viewCursor().view,pt);
 	    vfillcircle(ctx,spos,g_snapRadius);
 	}
 	
-	drawCrosshairFull(ctx,g_mousePos);
+	drawCrosshairFull(ctx,vc);
 }
 
-function drawCrosshairFull(context,cursor){
+function drawCrosshairFull(context,vc){
+  var spos=vc.screenpos;
   context.strokeStyle="#ffffff";
   context.globalAlpha=0.25;
   context.beginPath();
-  context.moveTo(cursor.x,0);
-  context.lineTo(cursor.x,1080);
+  context.moveTo(spos.x, vc.view.screenMin.y);
+  context.lineTo(spos.x, vc.view.screenMax.y);
   context.stroke();
   context.beginPath();
-  context.moveTo(0,cursor.y);
-  context.lineTo(1920,cursor.y);
+  context.moveTo(vc.view.screenMin.x,spos.y);
+  context.lineTo(vc.view.screenMax.x,spos.y);
   context.stroke();
 }
 function drawCrosshair(context,cursor,size){
@@ -802,11 +808,28 @@ function drawHrc(context,x,y,polys){
 }
 
 function getViewportList(){
-	if (g_views==1){
+	if (g_viewMode==0){
 		return [makeDefaultViewport()];
+	} else if (g_viewMode==1){
+		//picture-in-picture zoom
+		var vps=[];
+		var vp=makeDefaultViewport();
+		vps.push(vp);
+		vp=makeDefaultViewport();
+		vp.screenSize.x*=0.25;
+		vp.screenSize.y*=0.25;
+		vp.zoom=vp.screenSize.x/g_imageWorldSize.x;
+		vp.screenMin.x=vp.screenMax.x - vp.screenSize.x;
+		vp.screenMin.y=0;//vp.screenSize.y;
+		
+		vp.screenMax=vadd(vp.screenMin , vp.screenSize);
+		vp.screenCentre=vaverage(vp.screenMin,vp.screenMax);
+		vp.interestPoint=vscale(g_imageWorldSize,0.5);
+		vps.push(vp);
+		return vps;
 	}
 	else{
-		var vp=makeDefaultViewport();
+		//var vp=makeDefaultViewport();
 		var sOfs=vfromxyz(g_width/4,g_height/4,0);
 		var smin=vfromxyz(0,0,0);
 		var smax=vfromxyz(g_width,g_height,0);
@@ -821,8 +844,9 @@ function getViewportList(){
 			vpsub.axis=i;
 			vpsub.hasImage = (vpsub.axis==2)?true:false;
 
-			vpsub.screenSize={x:smax.x/2,y:smax.y/2,z:0};
-			vpsub.screenMin={x:si*(smax.x/2),y:sj*(smax.y/2),z:0};
+			vpsub.screenSize=vfromxyz(smax.x/2, smax.y/2, 0);
+			vpsub.screenMin=vfromxyz(si*(smax.x/2), sj*(smax.y/2), 0);
+			vpsub.screenMax=vadd(vpsub.screenMin,vpsub.screenSize);
 			vpsub.screenCentre=vadd(vpsub.screenMin,sOfs);
 			vpsub.zoom*=0.5;
 			vps.push(vpsub);
@@ -842,9 +866,20 @@ function repaint(){
 		repaintView(context,vps[i]);
 	}
 }
-
+function vctDrawAxialCross(vct,pos,size)
+{
+   vct.context.beginPath();
+   vctMoveTo(vct, vfromxyz(pos.x-size, pos.y, pos.z));
+   vctLineTo(vct, vfromxyz(pos.x+size, pos.y, pos.z));
+   vctMoveTo(vct, vfromxyz(pos.x, pos.y-size, pos.z));
+   vctLineTo(vct, vfromxyz(pos.x, pos.y+size, pos.z));
+   vctMoveTo(vct, vfromxyz(pos.x, pos.y, pos.z-size));
+   vctLineTo(vct, vfromxyz(pos.x, pos.y, pos.z+size));
+   vct.context.stroke();
+}
 function repaintView(context,vp) {
 	context.save();
+	context.beginPath();
 	context.rect(vp.screenMin.x,vp.screenMin.y, vp.screenSize.x,vp.screenSize.y);
 	context.stroke();
 	context.clip();
@@ -855,6 +890,7 @@ function repaintView(context,vp) {
 
     return;
   }
+	var vct={context:context,view:vp};
 //draw backgrounda
 	context.globalAlpha=1.0;
 	var img=g_img;
@@ -865,7 +901,7 @@ function repaintView(context,vp) {
   var sImgMax=worldToScreen(vp,imgMax);
   var sSize=vsub(sImgMax,sImgMin);
   context.fillStyle="#808080";
-  context.clearRect(0, 0, vp.screenSize.x, vp.screenSize.y);
+  context.clearRect(vp.screenMin.x, vp.screenMin.y, vp.screenSize.x, vp.screenSize.y);
   if (vp.hasImage){
 	  context.drawImage(img,0,0,img.width,img.height,
 		sImgMin.x,sImgMin.y, sSize.x, sSize.y);
@@ -874,18 +910,19 @@ function repaintView(context,vp) {
    var vct={context:context,view:vp};
    context.globalAlpha=0.25;
    context.strokeStyle="#000000"
-   context.beginPath();
-   vctMoveTo(vct, vfromxyz(0,-10000.0,0.0));
-   vctLineTo(vct, vfromxyz(0,10000.0,0.0));
-   vctMoveTo(vct, vfromxyz(10000.0,0.0,0.0));
-   vctLineTo(vct, vfromxyz(-10000.0,0.0,0.0));
-   vctMoveTo(vct, vfromxyz(0,0, 10000.0));
-   vctLineTo(vct, vfromxyz(0,0, -10000.0));
-   context.stroke();
+   vctDrawAxialCross(vct,vzero(),10000.0);
+
+   
 
 //  if (g_currentPoly>g_polys.length){currentPoly=-1;}
   drawPolygons(context,vp,g_polys,null,false);
 //  drawHrc(context,50,50,g_polys);
+
+   // draw InterestPoint
+   context.strokeStyle="#ffffff"
+   context.globalAlpha=0.2;
+   vctDrawAxialCross(vct,g_viewCentre,20.0/vp.zoom);
+
   
   // show current tool feedback
   if (g_drawfeedback){
@@ -900,8 +937,12 @@ function repaintView(context,vp) {
 	
 	g_cursorTxt=null;
   }
+  // show view type
+  {
+	context.globalAlpha=0.5;
+	context.fillStyle = "white";
 	context.fillText(g_axisName[vp.axis],vp.screenMin.x+15,vp.screenMin.y+15);
-
+  }
   drawStatusInfo(context);
   context.restore();
 }
@@ -1901,7 +1942,7 @@ function MergeVertices(){
 	}
 }
 function cloneVertex(v){
-	return {x:v.x, y:v.y, tag:v.tag, name:v.name, color:v.color}
+	return {x:v.x, y:v.y, z:v.z, tag:v.tag, name:v.name, color:v.color}
 }
 function SeperateVertices(){
 	console.log("seperate vertices");
@@ -2225,7 +2266,10 @@ function SubdivideByVertices(){
 	g_polys=newPolyList;
 }
 function ViewToggle(){
-	g_views^=(1^4);
+	g_viewMode+=1;
+	if (g_viewMode==3){
+		g_viewMode=0;
+	}
 }
 function isMultiSelect(){
 	return (g_shift && g_shiftIsMultiSelect);
@@ -2351,7 +2395,7 @@ window.addEventListener('keydown',  function(e){
   else if (kc==187){g_zoom*=1.2;}
   else if (kc==189){g_zoom/=1.2;}
 
-  var step=40.0/g_zoom;
+  var step=40.0;
   var vp=getViewport(g_mousePos);
   var sdelta=vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step,0);
   vaddto(g_viewCentre,screenDeltaToWorld({cursor:g_mousePos,view:vp},sdelta));
