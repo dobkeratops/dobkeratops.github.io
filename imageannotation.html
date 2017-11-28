@@ -42,7 +42,8 @@ document.getElementById("help").onclick=function(){alert(
 "shift-s\tseperate merged vertices\n"+
 "e\textrude tagged edges/polys\n"+
 "v\ttoggle views (main,nav,3d)\n"+
-"ctrl-p\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
+"shift-p\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
+"alt-p\tdraw quadstrip\n"+
 "'tag' here means 'selected'\n"
 )
 };
@@ -704,18 +705,18 @@ function drawFeedbackDrawQuadstrip(context){
 		var endpt=pickOrMakePoint(vc);
 		context.beginPath();
 		var l=g_drawingPoly.length;
-		vctMoveto(vct,g_drawingPoly[0]);
+		vctMoveTo(vct,g_drawingPoly[0]);
 		if (l>1){vctLineTo(vct,g_drawingPoly[1]);
 		}
 		if (l==1){
-		  vctLineTo(ctx,endpt);
+		  vctLineTo(vct,endpt);
 		}else if (l==2){
-		  vctLineTo(ctx,endpt);
-		  vctLineTo(ctx,g_drawingPoly[0]);
+		  vctLineTo(vct,endpt);
+		  vctLineTo(vct,g_drawingPoly[0]);
 		} else if (l==3){
-		  vctLineTo(ctx,endpt);
-		  vctLineTo(ctx,g_drawingPoly[2]);
-		  vctLineTo(ctx,g_drawingPoly[0]);
+		  vctLineTo(vct,endpt);
+		  vctLineTo(vct,g_drawingPoly[2]);
+		  vctLineTo(vct,g_drawingPoly[0]);
 		}
 		context.stroke();
     }
@@ -1345,10 +1346,10 @@ g_selectTool={
 		multiSelectMouseDown(e);
 	},
 	mouseclickup:function(e){
-		multiSelectMouseUp(e);
+		multiSelectMouseClickUp(e);
 	},
 	mouseup: function(e){
-		multiSelectMouseUp(e);
+		multiSelectMouseDragUp(e);
 	},
 	cancel: function(){
 		g_adjustPoint=null;
@@ -1492,8 +1493,14 @@ function multiSelectMouseMove(e) {
 	g_drawfeedback=dragFeedbackSelectRect;
 }
 function inrange(a,lo,hi){return a>=lo && a<=hi;}
-function multiSelectMouseUp(e){
-	console.log("multi select mouse up\n");
+
+function multiSelectMouseClickUp(e){
+	console.log("multiselect mouse click up");
+	multiSelectTagPoint(e);
+	g_multiSelectDrag=false;
+}
+function multiSelectMouseDragUp(e){
+	console.log("multi select mouse drag up\n");
 	var selectedVertices=new Map();
 	foreachVertex(function(v){selectedVertices.set(v,true);});
 	vc=viewCursor();
@@ -1515,7 +1522,6 @@ function multiSelectMouseUp(e){
 
 function multiSelectMouseDown(e) {
 	console.log("multi select click\n");
-	g_multiSelectDrag=true;
     var pick=pickPolyFeatureAt(viewCursor());
     if (pick.poly){
       g_currPoly=pick.poly;
@@ -1526,14 +1532,20 @@ function multiSelectMouseDown(e) {
     }
 	var pt=pickPointAt(viewCursor());
 	if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
+}
+function multiSelectTagPoint(e){
+	var pt=pickPointAt(viewCursor());
 	if (!pt){
+        console.log("MSTP didn't find point\n");
 		g_hackMoveTaggedVertices=false;
-		if (pick.selPoint){
-			pt=pick.selPoint;
+		if (g_adjustPoint){
+			if (g_adjustPoint.selPoint){
+				pt=g_adjustPoint.selPoint;
+			}
 		}
 	}
 	if (pt){
-        console.log("tag a point..\n");
+        console.log("MSMD tag a point..\n");
 		pt.tag=(pt.tag)?false:true;
 	}
 }
@@ -2199,11 +2211,48 @@ function PasteFromClipboard(){
 	});
 }
 
+function NumTaggedEdges(pl){
+	var num=0;
+	for (var i=0; i<pl.points.length; i++){
+		var vs=pl.points[i]; var ve=pl.points[(i+1)%pl.points.length];
+		if (vs.tag && ve.tag){	// subdiv style edge.. no
+			num+=1;
+		}
+	}
+	return num;
+}
+
+function SplitByTaggedVertices(newpls,pl){
+	console.log("split by tagged vertices..\n");
+	var numTags=0;
+	var polys0=[],polys1=[];
+	var side=0;
+	for (var i=0; i<pl.points.length; i++){
+		var pt=pl.points[i];
+		if (pt.tag){
+			polys0.push(pt); polys1.push(pt);
+			side^=1;
+		} else{
+			if (!side) polys0.push(pt); else polys1.push(pt);
+		}
+	}
+	console.log("split poly:"+pl.length+"->"+polys0.length+","+polys1.length);
+	var pl2={};// make a new poly, and insert into the list
+	pl2.points=polys1;
+	pl.points=polys0;
+	pl2.name=pl.name; pl2.color=pl.color;
+	newpls.push(pl);
+	newpls.push(pl2);
+	return true;
+}
 
 function SubdivideByVertices(){
+	g_polys=SubdivideByVerticesSub(g_polys);
+}
+function SubdivideByVerticesSub(polys){
 	// every edge- potentially split in the middle.
 	// every poly with 2 vertices - split between them
-	// every poly with all vertices set: add a midpoint while you're at it..
+	// every poly with all vertices set: add a midpoint while you're at it..2254
 /*	console.log("subdivide by vertices");
 	var edgemap=getSelectedEdgesByVertices();
 	var edgeMidPts=new Map();
@@ -2220,8 +2269,11 @@ function SubdivideByVertices(){
 	//can't just use [vs,ve] as keys adhoc; must be unique [vs,ve] object
 	console.log("create midpoints & build edgemap:-");
 	edgeMidPts=new Map();
-	for (var i=0; i<g_polys.length; i++){
-		pl=g_polys[i];
+	for (var i=0; i<polys.length; i++){
+		pl=polys[i];
+		if (pl.polygons){
+			pl.polygons=SubdivideByVerticesSub(pl.polygons);
+		}
 		for(j=0; j<pl.points.length;j++){
 			var vs=pl.points[j];
 			var ve=pl.points[(j+1)%pl.points.length];
@@ -2235,9 +2287,9 @@ function SubdivideByVertices(){
 	var newpl,midpt;
 	var newPolyList=[];
 	console.log("subdiv- poly list");
-	for (pli=0; pli<g_polys.length;console.log("increment pli"+pli), pli++){
-		console.log("subdiv- poly "+pli+"of"+g_polys.length);
-		var pl=g_polys[pli];
+	for (pli=0; pli<polys.length;console.log("increment pli"+pli), pli++){
+		console.log("subdiv- poly "+pli+"of"+polys.length);
+		var pl=polys[pli];
 		var numTagged=0;
 		for (var j=0; j<pl.points.length; j++){
 			if (pl.points[j].tag) {
@@ -2262,7 +2314,9 @@ function SubdivideByVertices(){
 				newPolyList.push(subpl);
 			}
 			console.log("done subdiv whole poly ");
-		}else{		
+		}else if (numTagged==2 && NumTaggedEdges(pl)==0){
+	 		SplitByTaggedVertices(newPolyList,pl);
+		}else {	
 			// just subdivide edges
 			console.log("subdiv- poly edges");
 			newpl={points:[], name:pl.name,color:pl.color};
@@ -2290,7 +2344,7 @@ function SubdivideByVertices(){
 		}
 	}
 	console.log("subdiv- done");
-	g_polys=newPolyList;
+	return newPolyList;
 }
 function ViewToggle(){
 	g_viewMode+=1;
@@ -2323,14 +2377,22 @@ editor.addEventListener('mouseup',   function(e){
 	g_leftmousebutton=false;
 	readMousePos(e);
 	if (g_multiSelectDrag){
-		multiSelectMouseUp(e);
+		multiSelectMouseDragUp(e);
 		g_multiSelectDrag=false;
 	}else {
 		// tools can distinguish drag-release from click-release
 		if (distSquared2d(g_dragstart,g_mousePos)>0){
-			g_tool.mouseup(e);
+			if (isMultiSelect()){
+				multiSelectMouseDragUp(e);
+			} else{
+				g_tool.mouseup(e);
+			}
 		} else {
-			g_tool.mouseclickup(e);
+			if (isMultiSelect()){
+				multiSelectMouseClickUp(e);
+			}else{		
+				g_tool.mouseclickup(e);
+			}
 		}
 	}
 	repaint();
@@ -2398,8 +2460,8 @@ window.addEventListener('keydown',  function(e){
   else if (kc==65){SetTool(g_adjustTool)}
   else if (kc==69){PushTool(g_extrudeTool)}
   else if (kc==80){
-    if (g_ctrl){ SetTool(g_parentTool);}
-	else SetTool((g_shift)?g_quadstripTool:g_polyTool)
+    if (g_shift){ SetTool(g_parentTool);}
+	else SetTool((g_alt)?g_quadstripTool:g_polyTool)
   }
   else if (kc==83){
 	if (g_shift){
