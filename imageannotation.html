@@ -24,7 +24,7 @@
 <script>
 
 document.getElementById("help").onclick=function(){alert(
-"hotkeys:\no\tdraw-point tool\nl\tdraw-line tool\nr\tdraw-rect tool\np\tdraw-poly tool\na\tadjust tool (move points & split edges)\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
+"hotkeys:\no\tdraw-points tool\nl\tdraw-line tool\nr\tdraw-rect tool\np\tdraw-poly tool\na\tadjust tool (move points & split edges)\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
 "backspace\tdelete polys or vertices\n"+
 "save\tdownloads current annotations as JSON\n"+
 "drag-drop JSON file to load image & annotations\n"+
@@ -1878,11 +1878,12 @@ function readMousePos(e) {
 //  g_mouseDelta.x=g_mousepos.x-opos.x;
 //  g_mouseDelta.y=g_mousepos.y-opos.y;
 }
-editor.addEventListener('touchstart',function(e){
-	alert(" touchstart");
-});
+editor.addEventListener('touchstart',editorMouseDown);
+editor.addEventListener('touchend',editorMouseUp);
+editor.addEventListener('touchmove',editorMouseMove);
 
-editor.addEventListener('mousemove',function(e){
+editor.addEventListener('mousemove',editorMouseMove);
+function editorMouseMove(e){
 	readMousePos(e);
 
 	if (g_multiSelectDrag){
@@ -1902,7 +1903,7 @@ editor.addEventListener('mousemove',function(e){
 		}
 	}
 	repaint();
-});
+}
 
 editor.addEventListener("wheel", function(e){
 	console.log("mouse wheel event"+JSON.stringify(e)+e.deltaY);
@@ -2405,8 +2406,9 @@ function ViewToggle(){
 function isMultiSelect(){
 	return (g_shift && g_shiftIsMultiSelect);
 }
-editor.addEventListener('mousedown',
-	function(e){
+editor.addEventListener('mousedown',editorMouseDown);
+
+function editorMouseDown(e){
 	
 		g_leftmousebutton=true;
 		readMousePos(e);
@@ -2426,10 +2428,10 @@ editor.addEventListener('mousedown',
 			}
 		}
 		repaint();
-	}
-);
+	};
 g_dragLineDragging=false; // temp hack, fugly.
-editor.addEventListener('mouseup',   function(e){
+editor.addEventListener('mouseup',editorMouseUp);
+function editorMouseUp(e){
 	g_leftmousebutton=false;
 	readMousePos(e);
 //	if (g_multiSelectDrag){
@@ -2459,7 +2461,8 @@ editor.addEventListener('mouseup',   function(e){
 	}
 	g_multiSelectDrag=false;
 	repaint();
-});
+}
+
 window.addEventListener('keyup', function(e){
   kc=e.keyCode;
   console.log("keyup:"+kc);
