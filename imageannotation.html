@@ -30,20 +30,20 @@ document.getElementById("help").onclick=function(){alert(
 "save\tdownloads current annotations as JSON\n"+
 "drag-drop JSON file to load image & annotations\n"+
 "drag drop image URL to begin annotating an image\n"+
-"ctrl-v\tduplicate selected poly at cursor\n"+
+"ctrl-V\tduplicate selected poly at cursor\n"+
 "cursorkeys,-+\tscroll,zoom\n"+
-"f\treset view (show all)\n"+
+"F\treset view (show all)\n"+
 "\n"+
 "Advanced:-\n"+
 "t\tmulti select tool-'tags' (points, rect-drag)\n"+
 "shift+LMB\tmulti-select points\n"+
-"s\tSubdivide edges/polys by tagged vertices\n"+
-"m\tMerge tagged vertices\n"+
-"shift-s\tseperate merged vertices\n"+
-"e\textrude tagged edges/polys\n"+
-"v\ttoggle views (main,nav,3d)\n"+
-"shift-p\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
-"alt-p\tdraw quadstrip\n"+
+"S\tSubdivide edges/polys by tagged vertices\n"+
+"M\tMerge tagged vertices\n"+
+"shift-S\tseperate merged vertices\n"+
+"E\textrude tagged edges/polys\n"+
+"V\ttoggle views (main,nav,3d)\n"+
+"shift-P\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
+"alt-P\tdraw quadstrip\n"+
 "'tag' here means 'selected'\n"
 )
 };
@@ -393,7 +393,7 @@ function polyOctFromRect(view,rc) {
 function distSquared2d(a,b){
    var dx=b.x-a.x; var dy=b.y-a.y; return dx*dx+dy*dy;
 }
-g_snapRadius=5;
+g_snapRadius=6;
 
 // any polygon points that are colinear with prev/next deemed extraneous - remove
 function trimPolyPoints(poly) {
@@ -494,7 +494,7 @@ function dragFeedbackSelectRect(context){
 }
 function dragFeedbackMultiSelect(context){
 	drawCrosshairFull(context,viewCursor());
-	drawFeedbackPickPolyPoint(context);
+	drawFeedbackPickPoint(context);
 }
 
 function getSnappedRefPoint(viewcursor){
@@ -716,7 +716,7 @@ function drawFeedbackDrawQuadstrip(context){
 		} else if (l==3){
 		  vctLineTo(vct,endpt);
 		  vctLineTo(vct,g_drawingPoly[2]);
-		  vctLineTo(vct,g_drawingPoly[0]);
+		  vctLineTo(vctt,g_drawingPoly[0]);
 		}
 		context.stroke();
     }
@@ -741,6 +741,15 @@ function drawFeedbackPickPolyPoint(ctx) {
 		vfillcircle(ctx,spos,g_snapRadius);
 	}
 }
+function drawFeedbackPickPoint(ctx) {
+	ctx.globalAlpha=0.5;
+	var pt=pickPointAt(viewCursor());
+	if (pt){
+		var spos=worldToScreen(viewCursor().view,pt);
+		vfillcircle(ctx,spos,g_snapRadius);
+	}
+}
+
 function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
 	var vc=viewCursor();
@@ -1226,7 +1235,7 @@ g_polyTool=makeDrawToolVariant(
 		g_drawfeedback=drawFeedbackDrawPoly;
 		console.log("add poly point");
 		if (g_drawingPoly.length>2){
-			if (distSquared2d(g_mousePos,g_drawingPoly[0])<sqr(g_snapRadius)){
+			if (cursorScreenDistSquared(viewCursor(),g_drawingPoly[0])<sqr(g_snapRadius)){
 				console.log("finish poly");
 				AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
 				g_drawingPoly=[];
@@ -1338,6 +1347,7 @@ g_selectTool={
 		SetCursor("default");
 	},
 	mousepassivemove: function(e){
+		multiSelectPassiveMouseMove(e);
 	},
 	mousedrag: function(e){
 		multiSelectMouseMove(e);
@@ -1471,7 +1481,7 @@ g_extrudeTool={
 	},
 	mousepassivemove: function(e){
 		vtc=GetSelectedVertices();
-		console.log("selvtc len=",vtc.length+"mousedelta="+JSON.stringify(g_mouseScreenDelta));
+//		console.log("selvtc len=",vtc.length+"mousedelta="+JSON.stringify(g_mouseScreenDelta));
 		worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
 		vtc.forEach(function(val,keypt,map){
 			
@@ -1491,6 +1501,10 @@ g_multiSelectDrag=false;
 function multiSelectMouseMove(e) {
 	console.log("multi select mouse move,tool=",g_tool.name);
 	g_drawfeedback=dragFeedbackSelectRect;
+}
+function multiSelectPassiveMouseMove(e) {
+	console.log("multi select mouse move,tool=",g_tool.name);
+	g_drawfeedback=dragFeedbackMultiSelect;
 }
 function inrange(a,lo,hi){return a>=lo && a<=hi;}
 
@@ -1522,7 +1536,7 @@ function multiSelectMouseDragUp(e){
 
 function multiSelectMouseDown(e) {
 	console.log("multi select click\n");
-    var pick=pickPolyFeatureAt(viewCursor());
+/*    var pick=pickPolyFeatureAt(viewCursor());
     if (pick.poly){
       g_currPoly=pick.poly;
       g_adjustPoint=pick;
@@ -1530,12 +1544,18 @@ function multiSelectMouseDown(e) {
         console.log("move point..");
       }
     }
+*/
 	var pt=pickPointAt(viewCursor());
-	if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
+	if (pt) {
+		if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
+	} else{
+		g_multiSelectDrag=true;
+	}
+	
 }
 function multiSelectTagPoint(e){
 	var pt=pickPointAt(viewCursor());
-	if (!pt){
+/*	if (!pt){
         console.log("MSTP didn't find point\n");
 		g_hackMoveTaggedVertices=false;
 		if (g_adjustPoint){
@@ -1544,7 +1564,7 @@ function multiSelectTagPoint(e){
 			}
 		}
 	}
-	if (pt){
+*/	if (pt){
         console.log("MSMD tag a point..\n");
 		pt.tag=(pt.tag)?false:true;
 	}
@@ -2376,13 +2396,13 @@ editor.addEventListener('mousedown',
 editor.addEventListener('mouseup',   function(e){
 	g_leftmousebutton=false;
 	readMousePos(e);
-	if (g_multiSelectDrag){
-		multiSelectMouseDragUp(e);
-		g_multiSelectDrag=false;
-	}else {
+//	if (g_multiSelectDrag){
+//		multiSelectMouseDragUp(e);
+//	}else
+//	{
 		// tools can distinguish drag-release from click-release
 		if (distSquared2d(g_dragstart,g_mousePos)>0){
-			if (isMultiSelect()){
+			if (isMultiSelect() || g_multiSelectDrag){
 				multiSelectMouseDragUp(e);
 			} else{
 				g_tool.mouseup(e);
@@ -2394,7 +2414,8 @@ editor.addEventListener('mouseup',   function(e){
 				g_tool.mouseclickup(e);
 			}
 		}
-	}
+//	}
+	g_multiSelectDrag=false;
 	repaint();
 });
 window.addEventListener('keyup', function(e){
