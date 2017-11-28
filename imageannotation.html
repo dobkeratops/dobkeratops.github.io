@@ -31,6 +31,7 @@ document.getElementById("help").onclick=function(){alert(
 "drag-drop JSON file to load image & annotations\n"+
 "drag drop image URL to begin annotating an image\n"+
 "ctrl-v\tduplicate selected poly at cursor\n"+
+"cursorkeys,-+\tscroll,zoom\n"+
 "\n"+
 "Advanced:-\n"+
 "t\tmulti select tool-'tags' (points, rect-drag)\n"+
@@ -123,17 +124,20 @@ var g_showAllPolys=true;
 var g_currentPolyOutline="#ffffff";
 var g_promptSevereTools=true;
 var g_shiftIsMultiSelect=true;
-var g_mousepos={};
+var g_mousePos={};
 var g_dragstart={};
 var g_drawfeedback=null;
 var g_polys=[];
 var g_tool;
 var g_img = new window.Image();
-var g_mouseDelta=vzero();
+var g_mouseScreenDelta=vzero();
 var g_showVertices=true;
-var g_selectedColor="white"
-var g_labelColor="white"
+var g_selectedColor="white";
+var g_labelColor="white";
 var g_hackMoveTaggedVertices=false;
+var g_view={centre:{x:0,y:0,z:0},scale:1.0};
+var g_viewCentre={x:editor.width/2,y:editor.height/2,z:0};
+var g_zoom=1.0;
 // default image to load..
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
@@ -167,7 +171,7 @@ function vsumElem(a){return a.x+a.y+a.z;}
 function vsub(lhs,rhs){return {x:lhs.x-rhs.x, y:lhs.y-rhs.y, z:lhs.z-rhs.z};}
 function vabs(v){return {x:Math.abs(v.x), y:Math.abs(v.y)}; }
 function vfromxy(vx,vy){return {x:vx,y:vy,z:0};}
-function vfromxyz(vx,vy,vz){return {x:vx,y:vy,z:vz};}
+function vfromxyz(vx,vy,vz){return {x:vx, y:vy, z:vz};}
 function lerp(a,b,f){return (b-a)*f+a;}
 function vlerp(a,b,f){
 	return {x:lerp(a.x,b.x,f), y:lerp(a.y,b.y,f), z:lerp(a.z,b.z,f)};
@@ -214,7 +218,38 @@ var g_scaled_w = 1024; g_scaled_h= (g_scaled_w * g_img.height)/g_img.width;
 function lerp(a,b,f){
    return (b-a)*f+a;
 }
-function polyDiagonalHexFromRect(rc) {
+// transformations
+
+function worldToScreen(view, wpos){
+//	console.log(JSON.stringify(view));
+	return vadd(vscale(vsub(wpos,view.interestPoint),view.zoom),view.screenCentre);
+//	return vscale(vadd(wpos,view.interestPoint),view.zoom);
+}
+function screenToWorld(view, spos){
+	return vadd(vscale(vsub(spos,view.screenCentre),1.0/view.zoom),view.interestPoint);
+//	return vsub(vscale(spos,view.zoom),view.interestPoint);
+}
+
+function screenPointsToWorld(view,pts){
+	wpts=[];
+	for (var i=0;i<pts.length;i++){
+		wpts.push(screenToWorld(view,pts[i]));
+	}
+	return wpts;
+}
+function vctMoveTo(vct,pos){
+	var spos=worldToScreen(vct.view, pos);
+//	console.log("spos="+JSON.stringify(spos));
+	vct.context.moveTo(spos.x,spos.y);
+}
+function vctLineTo(vct,pos){
+
+	var spos=worldToScreen(vct.view, pos);
+//	console.log("spos="+JSON.stringify(spos));
+	vct.context.lineTo(spos.x,spos.y);
+}
+
+function polyDiagonalHexFromRect(view,rc) {
   size=vabs(vsub(rc.end,rc.start));
   var width = size.x;
   var height = size.y;
@@ -228,46 +263,46 @@ function polyDiagonalHexFromRect(rc) {
 
   if (width > height) { // wider than tall - split horiz
      return {
-      points:[
+      points:screenPointsToWorld(view,[
         vfromxyz(x0,lerp(y0,y1,fyy,	z)),
         vfromxyz(lerp(x0,x1,fx),y0,	z),
         vfromxyz(x1,   lerp(y0,y1,fy),	z),
         vfromxyz(x1,   lerp(y1,y0,fyy),	z),
         vfromxyz(lerp(x1,x0,fx), y1,	z),
         vfromxyz(x0,   lerp(y1,y0,fy),	z)
-      ],
+      ]),
       name:rc.name
      };
   } else {
      midy=(rc.start.y+rc.end.y)*0.5;
      return {
-      points:[
+      points:screenPointsToWorld(view,[
         vfromxyz(lerp(x0,x1,fyy),     y0,z),
         vfromxyz(lerp(x1,x0,fy),     y0,z),
         vfromxyz(x1,     lerp(y0,y1,fy),z),
         vfromxyz(lerp(x1,x0,fyy),     y1,z),
         vfromxyz(lerp(x0,x1,fy),  y1,z),
         vfromxyz(x0,      lerp(y1,y0,fy),z)
-      ],
+      ]),
       name:rc.name
     };
   }
 }
 
-function polyFromRect(rc) {
+function polyFromRect(view,rc) {
 	var z=0;
   return {
-    points:[
-      vfromxyz(rc.start.x, rc.start.y ,z),
+    points:
+      screenPointsToWorld(view,[vfromxyz(rc.start.x, rc.start.y ,z),
       vfromxyz(rc.end.x,   rc.start.y ,z),
       vfromxyz(rc.end.x,   rc.end.y ,z),
       vfromxyz(rc.start.x, rc.end.y ,z)
-    ],
+    ]),
     name:rc.name
   };
 }
 
-function polyOctFromRect(rc) {
+function polyOctFromRect(view,rc) {
   var x0 = rc.start.x;
   var y0 = rc.start.y;
   var x1 = rc.end.x;
@@ -275,7 +310,7 @@ function polyOctFromRect(rc) {
   var t=0.1; // trim a little from the corners
   var z=0;
   return {
-    points:[
+    points:screenPointsToWorld(view,[
       vfromxyz(lerp(x0,x1,t),  y0,z),
       vfromxyz(lerp(x1,x0,t),  y0,z),
       vfromxyz(x1,  lerp(y0,y1,t),z),
@@ -284,7 +319,7 @@ function polyOctFromRect(rc) {
       vfromxyz(lerp(x0,x1,t),  y1,z),
       vfromxyz(x0,  lerp(y1,y0,t),z),
       vfromxyz(x0,  lerp(y0,y1,t),z),
-    ],
+    ]),
     name:rc.name
   };
 }
@@ -354,16 +389,16 @@ function drawRectOutline(context,start,end){
   context.stroke();
 }
 function dragFeedbackCrosshairFull(context){
-  drawCrosshairFull(context,g_mousepos);
+  drawCrosshairFull(context,g_mousePos);
 }
-function drawPointSnapCrosshair(ctx,cursorPos){
-  vt=pickPointAt(cursorPos);
-  drawCrosshair(ctx,vt?vt:cursorPos,g_snapRadius*2);
+function drawPointSnapCrosshair(ctx,viewcursor){
+  vt=pickPointAt(viewcursor);
+  drawCrosshair(ctx,vt?worldToScreen(viewcursor.view,vt):viewcursor.screenpos,g_snapRadius*2);
   if (vt) { vfillcircle(ctx,vt,g_snapRadius);}
 }
 
 function dragFeedbackCrosshair(context){
-  drawPointSnapCrosshair(context,g_mousepos,g_snapRadius);
+  drawPointSnapCrosshair(context,viewCursor(),g_snapRadius);
 }
 function vmoveto(context,v){
 	context.moveTo(v.x,v.y);
@@ -377,9 +412,9 @@ function dragFeedbackRectSub(context,color,alpha){
     context.fillStyle = color;
     context.beginPath();
 	context.moveTo(g_dragstart.x,g_dragstart.y);
-    context.lineTo(g_mousepos.x,g_dragstart.y);
-    context.lineTo(g_mousepos.x,g_mousepos.y);
-    context.lineTo(g_dragstart.x,g_mousepos.y);
+    context.lineTo(g_mousePos.x,g_dragstart.y);
+    context.lineTo(g_mousePos.x,g_mousePos.y);
+    context.lineTo(g_dragstart.x,g_mousePos.y);
     context.closePath();
     context.fill();
 }
@@ -392,51 +427,82 @@ function dragFeedbackSelectRect(context){
 	}
 }
 function dragFeedbackMultiSelect(context){
-	drawCrosshairFull(context,g_mousepos);
+	drawCrosshairFull(context,g_mousePos);
 	drawFeedbackPickPolyPoint(context);
 }
 
-function getSnappedRefPoint(cursor){
-   vt=pickPointAt(cursor);
-   return vt?vt:cursor;
+function getSnappedRefPoint(viewcursor){
+   vt=pickPointAt(viewcursor);
+   return vt?vt:viewcursor.worldpos;
 }
-
+function getViewport(spos){
+	//todo - transform matrix.
+	// interim.. window bounds, centre,scale
+	return {
+		screenCentre:vfromxyz(g_width*0.5,g_height*0.5),
+		zoom:g_zoom,
+		interestPoint:g_viewCentre
+	}
+}
+function viewCursorAt(spos){
+	var vp=getViewport(spos);
+	return {
+		worldpos:screenToWorld(vp,spos),
+		screenpos:spos,
+		view:vp
+	}
+}
+function viewCursor(){
+	return viewCursorAt(g_mousePos);
+}
+function viewContext(ctx,view){
+	return {context:ctx, view:view};
+}
 function dragFeedbackLine(context){
+	var vc=viewCursor();
+//	var vct=viewContext(context,vc.view);
+	var vct={context:context, view:vc.view};
+
     context.globalAlpha=0.75;
     context.strokeStyle = "red";
     context.beginPath();
     context.moveTo(g_dragstart.x,g_dragstart.y);
-    endpoint=getSnappedRefPoint(g_mousepos);
-    context.lineTo(endpoint.x,endpoint.y);
+    var endpoint=getSnappedRefPoint(viewCursor());
+    vctLineTo(vct,endpoint);
     context.stroke();
-    drawPointSnapCrosshair(context,g_mousepos);
+    drawPointSnapCrosshair(context,vc);
 }
 
-function pickPointAt(cursorPt) {
+function cursorScreenDistSquared(viewcursor, worldpoint){
+	return distSquared2d(viewcursor.screenpos,worldToScreen(viewcursor.view, worldpoint));
+}
+function pickPointAt(vcursor) {
   var vertex=null;
   var minDist2=g_snapRadius*g_snapRadius;
   var pickPointAtSub=function (polys){
     for (var pli=0; pli<polys.length; pli++) {
 	  var pl=polys[pli];
       for (var pti=0; pti<pl.points.length; pti++) {
-         d2=distSquared2d(pl.points[pti],cursorPt);
+         d2=cursorScreenDistSquared(vcursor, pl.points[pti]);
          if (d2<minDist2){
            minDist2=d2;
            vertex=pl.points[pti];
 		 }
        }
-	  if (pl.polygons) {pickPointAtSub(pl.polygons,cursorPt);}
+	  if (pl.polygons) {pickPointAtSub(pl.polygons,vcursor);}
     }
   }
   pickPointAtSub(g_polys);
   return vertex;
 }
 
-function pickOrMakePoint(cursorPt){
-  var vt=pickPointAt(cursorPt);
+function pickOrMakePoint(vcursor){
+  var vt=pickPointAt(vcursor);
   if (vt) {return vt;}
   // makes a free point assuming it will be used.
-  return vfromxy(cursorPt.x, cursorPt.y);
+  return vcursor.worldpos;
+//  return vfromxy(cursorPt.x, cursorPt.y);
+
 //  newpl=polyFromPoint(cursorPt,"");
 //  AddPoly(newpl);
 //  return newpl.points[0];
@@ -447,14 +513,14 @@ function IsVisible(pl){
    return pl==g_currPoly;
 }
 
-function pickPolyAt(cursorPt){
-	var picked=pickPolyFeatureAt(cursorPt);
+function pickPolyAt(viewcursor){
+	var picked=pickPolyFeatureAt(viewcursor);
 	if (picked){
 		return picked.poly;
 	}
 	return null;
 }
-function pickPolyFeatureAt(cursorPt) {
+function pickPolyFeatureAt(viewcursor) {
 	var picked={
 		selPoint:null,
 		poly:null,
@@ -472,7 +538,7 @@ function pickPolyFeatureAt(cursorPt) {
 
 			// pick the polygon centre?
 			centre=polyCentre(pl.points);
-			d2=distSquared2d(centre,cursorPt);
+			d2=cursorScreenDistSquared(viewcursor,centre);
 			if (d2<minDist2 && d2<g_snapRadius*g_snapRadius){
 				minDist2=d2;
 				picked.edge=null;
@@ -486,7 +552,7 @@ function pickPolyFeatureAt(cursorPt) {
 				var evs=pl.points[pti];
 				var eve=pl.points[pti1];
 				var edgeCentre=vaverage(evs,eve);
-				var d2=distSquared2d(edgeCentre,cursorPt);
+				var d2=cursorScreenDistSquared(viewcursor,edgeCentre);
 				if (d2<=minDist2){
 					minDist2=d2;
 					picked.poly=pl;
@@ -499,7 +565,7 @@ function pickPolyFeatureAt(cursorPt) {
 			// pick polygon vertex?
 			for (var pti=0; pti<pl.points.length; pti++) {
 				pt=pl.points[pti];
-				var d2=distSquared2d(pt,cursorPt);
+				var d2=cursorScreenDistSquared(viewcursor,pt);
 				if (d2<=minDist2){
 					minDist2=d2;
 					picked.selPoint=pt;
@@ -518,49 +584,57 @@ function pickPolyFeatureAt(cursorPt) {
 	return picked;
 }
 
+function keyDelta(key,dec,inc){
+	return (key==dec)?-1:(key==inc)?1:0;
+}
+
 function drawFeedbackDrawPoly(context){
 	
     if (g_drawingPoly.length>0){
       context.globalAlpha=0.75;
       context.strokeStyle = "red";
-      endpt=pickOrMakePoint(g_mousepos);
-      if (distSquared2d(g_drawingPoly[0],g_mousepos)<g_snapRadius*g_snapRadius) {
+	  var vc=viewCursor();
+      var endpt=pickOrMakePoint(vc);
+      if (cursorScreenDistSquared(vc,g_drawingPoly[0])<g_snapRadius*g_snapRadius) {
         endpt=g_drawingPoly[0];
         context.strokeStyle = g_currentPolyOutline;
         context.globalAlpha=1.0;
       }
       context.beginPath();
-      vmoveto(context,g_drawingPoly[0]);
+	  var vct={context:context, view:vc.view};
+      vctMoveTo(vct,g_drawingPoly[0]);
       for (var i=1; i<g_drawingPoly.length; i++){
-        vlineto(context,g_drawingPoly[i]);
+        vctLineTo(vct,g_drawingPoly[i]);
       }
-      vlineto(context,endpt);
-      vlineto(context,g_drawingPoly[0]);
+      vctLineTo(vct,endpt);
+      vctLineTo(vct,g_drawingPoly[0]);
       context.stroke();
     }
     dragFeedbackCrosshair(context);
 }
 function drawFeedbackDrawQuadstrip(context){
     if (g_drawingPoly.length>0){
-      context.globalAlpha=0.75;
-      context.strokeStyle = "red";
-      var endpt=pickOrMakePoint(g_mousepos);
-      context.beginPath();
-	  var l=g_drawingPoly.length;
-	  vmoveto(context,g_drawingPoly[0]);
-      if (l>1){vlineto(context,g_drawingPoly[1]);
-	  }
-	  if (l==1){
-	      vlineto(context,endpt);
-	  }else if (l==2){
-	      vlineto(context,endpt);
-	      vlineto(context,g_drawingPoly[0]);
-	  } else if (l==3){
-	      vlineto(context,endpt);
-	      vlineto(context,g_drawingPoly[2]);
-	      vlineto(context,g_drawingPoly[0]);
-	  }
-      context.stroke();
+		vc=viewCursor();
+		vct={context:context, view:vc.view};
+		context.globalAlpha=0.75;
+		context.strokeStyle = "red";
+		var endpt=pickOrMakePoint(vc);
+		context.beginPath();
+		var l=g_drawingPoly.length;
+		vctMoveto(vct,g_drawingPoly[0]);
+		if (l>1){vctLineTo(vct,g_drawingPoly[1]);
+		}
+		if (l==1){
+		  vctLineTo(ctx,endpt);
+		}else if (l==2){
+		  vctLineTo(ctx,endpt);
+		  vctLineTo(ctx,g_drawingPoly[0]);
+		} else if (l==3){
+		  vctLineTo(ctx,endpt);
+		  vctLineTo(ctx,g_drawingPoly[2]);
+		  vctLineTo(ctx,g_drawingPoly[0]);
+		}
+		context.stroke();
     }
     dragFeedbackCrosshair(context);
 }
@@ -577,19 +651,21 @@ function polyCentre(poly){
 
 function drawFeedbackPickPolyPoint(ctx) {
 	ctx.globalAlpha=0.5;
-	picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(g_mousepos);
-	if (picked.poly) { 
-		vfillcircle(ctx,picked.pickedPoint,g_snapRadius);
+	picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(viewCursor());
+	if (picked.poly) {
+		var spos=worldToScreen(viewCursor().view,picked.pickedPoint);
+		vfillcircle(ctx,spos,g_snapRadius);
 	}
 }
 function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
-	var pt = pickPointAt(g_mousepos);
+	var pt = pickPointAt(viewCursor());
 	if (pt){
-	    vfillcircle(ctx,pt,g_snapRadius);
+		var spos=worldToScreen(viewCursor().view,pt);
+	    vfillcircle(ctx,spos,g_snapRadius);
 	}
 	
-	drawCrosshairFull(ctx,g_mousepos);
+	drawCrosshairFull(ctx,g_mousePos);
 }
 
 function drawCrosshairFull(context,cursor){
@@ -638,7 +714,8 @@ function drawStatusInfo(ctx) {
 	ctx.fillStyle=g_currentPolyOutline;
 
 	var text=g_tool.name+"\n";
-	text+="x="+g_mousepos.x+" y="+g_mousepos.y;
+	vc=viewCursor();
+	text+="x="+vc.worldpos.x+" y="+vc.worldpos.y+" z="+vc.worldpos.z;
 	ctx.globalAlpha=0.75;
 	ctx.fillStyle="#000000";
 	ctx.fillText(text,20, 22);
@@ -671,12 +748,22 @@ function repaint() {
     return;
   }
 //draw background
+	vp=getViewport(g_mousePos);
   context.globalAlpha=1.0;
   var img=g_img;
-  context.drawImage(img,0,0,img.width,img.height,0,0,g_scaled_w,g_scaled_h);
+  //todo- transform and clip the image..
+  var imgMin=vfromxyz(0,0,0);
+  var imgMax=vfromxyz(g_scaled_w,g_scaled_h,0);
+  var sImgMin=worldToScreen(vp,imgMin);
+  var sImgMax=worldToScreen(vp,imgMax);
+  var sSize=vsub(sImgMax,sImgMin);
+  context.fillStyle="#808080"
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(img,0,0,img.width,img.height,
+	sImgMin.x,sImgMin.y, sSize.x, sSize.y);
 
 //  if (g_currentPoly>g_polys.length){currentPoly=-1;}
-  drawPolygons(context,g_polys,null,false);
+  drawPolygons(context,vp,g_polys,null,false);
 //  drawHrc(context,50,50,g_polys);
   
   // show current tool feedback
@@ -688,7 +775,7 @@ function repaint() {
 	  context.fillStyle = "white";
     context.font = "15px Arial";
         context.textAlign="left";
-        context.fillText(g_cursorTxt, g_mousepos.x,g_mousepos.y+30);
+        context.fillText(g_cursorTxt, g_mousePos.x,g_mousePos.y+30);
 	
 	g_cursorTxt=null;
   }
@@ -696,9 +783,11 @@ function repaint() {
   drawStatusInfo(context);
 }
 
-function drawPolygons(context,polys,parent,sel){
+function drawPolygons(context,vp,polys,parent,sel){
   g_showLabelNames=document.getElementById("showLabels").checked;
-  g_showAllPolys=document.getElementById("showAllPolys").checked;   
+  g_showAllPolys=document.getElementById("showAllPolys").checked;
+  var vct=viewContext(context,vp);
+  vct.context=context;
 
   context.globalAlpha=0.5;
   context.fillStyle = "green";
@@ -723,14 +812,13 @@ function drawPolygons(context,polys,parent,sel){
     // account for selection in rendering style.
     currentPolyOutlineColor = (pl==g_currPoly || sel)?g_currentPolyOutline:pl.color;
 
-
     // fill the area
     context.globalAlpha=0.25;
     if (pl.points.length>2){
       context.beginPath();
-      context.moveTo(pl.points[pl.points.length-1].x,pl.points[pl.points.length-1].y);
+      vctMoveTo(vct,pl.points[pl.points.length-1]);
       for (var j=0; j<pl.points.length; j++) {
-        context.lineTo(pl.points[j].x,pl.points[j].y);
+        vctLineTo(vct,pl.points[j]);
       }
       context.closePath();
       context.fillStyle = pl.color;
@@ -744,18 +832,17 @@ function drawPolygons(context,polys,parent,sel){
       for (var j=0; j<pl.points.length; j++) {
 		vt=pl.points[j];
 		size=vt.tag?g_snapRadius:g_snapRadius/2;
-        vfillcircle(context,pl.points[j],size);
+        vfillcircle(context,worldToScreen(vp,pl.points[j]),size);
       }
     }
 
     // get the centroid
-    pos=polyCentre(pl.points);
+    pos=worldToScreen(vp,polyCentre(pl.points));
     // stroke the outline
     context.strokeStyle = currentPolyOutlineColor;
     context.globalAlpha=0.75;
     context.beginPath();
 
-    vmoveto(context,pl.points[pl.points.length-1]);
     if (pl.points.length==1){ // it's a single-point crosshair
       
       context.moveTo(pos.x-g_snapRadius*2,pos.y);
@@ -765,9 +852,12 @@ function drawPolygons(context,polys,parent,sel){
       context.lineTo(pos.x,pos.y+g_snapRadius*2);
       context.stroke();
     }
-    else for (var j=0; j<pl.points.length; j++) { // it's a prpper poly.
-      vlineto(context,pl.points[j]);
-    }
+    else{
+	    vctMoveTo(vct,pl.points[pl.points.length-1]);
+		for (var j=0; j<pl.points.length; j++) { // it's a prpper poly.
+			vctLineTo(vct,pl.points[j]);
+		}
+	}
    
     context.stroke();
     // draw the label name.
@@ -790,7 +880,7 @@ function drawPolygons(context,polys,parent,sel){
     }
 	// does this polygon have components..
 	if (pl.polygons){
-		drawPolygons(context,pl.polygons,pl,sel||(pl==g_currPoly));
+		drawPolygons(context,vp,pl.polygons,pl,sel||(pl==g_currPoly));
 	}
   }
 
@@ -842,10 +932,10 @@ function makeRectToolVariant(polyCreateFn,txt){
         g_drawfeedback=dragFeedbackCrosshairFull;
 	},
     mouseup:function(e){
-        newrect={start:g_dragstart,end:g_mousepos,name: getCurrentLabel()};
+        newrect={start:g_dragstart,end:g_mousePos,name: getCurrentLabel()};
     
-        if (distSquared2d(g_dragstart,g_mousepos)>0){
-          AddPoly(polyCreateFn(newrect));
+        if (distSquared2d(g_dragstart,g_mousePos)>0){
+          AddPoly(polyCreateFn(viewCursor().view,newrect));
         }
         g_drawfeedback=dragFeedbackCrosshairFull;
     }
@@ -882,7 +972,7 @@ g_parentTool={
 	mouseclickup:function(e){
 		console.log("change hrc: before:- "+g_polys.length);
 		dumpHrc(g_polys,0);
-		var poly=pickPolyAt(g_mousepos);
+		var poly=pickPolyAt(viewCursor());
 		if (!g_currPoly){g_currPoly=poly; repaint();}
 		else if (g_currPoly && poly){
 			if(!isParentOf(g_currPoly,poly) && poly!=g_currPoly){
@@ -912,17 +1002,17 @@ g_dragLineTool={
   },
   mouseup:function(e){
       
-      newline={start:g_dragstart,end:g_mousepos};
+      //newline={start:g_dragstart,end:g_mousePos};
       // only issue if there is length.
-      if (distSquared2d(g_dragstart,g_mousepos)>0){
-        vstart=pickOrMakePoint(g_dragstart);
-        vend=pickOrMakePoint(g_mousepos);
+      if (distSquared2d(g_mousePos,g_dragstart)>0){
+        vstart=pickOrMakePoint(viewCursorAt(g_dragstart));
+        vend=pickOrMakePoint(viewCursor());
         AddPoly({points:[vstart,vend], name:getCurrentLabel()});
       }
       g_drawfeedback=dragFeedbackCrosshair;
   },
   cancel:function(){
-      g_dragstart=g_mousepos;
+      g_dragstart=g_mousePos;
       g_drawfeedback=dragFeedbackCrosshair;
   }
 };
@@ -956,17 +1046,17 @@ g_polyTool=makeDrawToolVariant(
 		g_drawfeedback=drawFeedbackDrawPoly;
 		console.log("add poly point");
 		if (g_drawingPoly.length>2){
-			if (distSquared2d(g_mousepos,g_drawingPoly[0])<sqr(g_snapRadius)){
+			if (distSquared2d(g_mousePos,g_drawingPoly[0])<sqr(g_snapRadius)){
 				console.log("finish poly");
 				AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
 				g_drawingPoly=[];
 				return;
 			}
 		}
-		g_drawingPoly.push(pickOrMakePoint(g_mousepos));
+		g_drawingPoly.push(pickOrMakePoint(viewCursor()));
 	},
 	function(e){
-		g_drawingPoly.push(pickOrMakePoint(g_mousepos));
+		g_drawingPoly.push(pickOrMakePoint(viewCursor()));
 		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
 		g_drawingPoly=[];
 	}
@@ -975,7 +1065,7 @@ g_polyTool=makeDrawToolVariant(
 g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
   g_drawfeedback=drawFeedbackDrawQuadstrip;
   console.log("add quadstrip point");
-  g_drawingPoly.push(pickOrMakePoint(g_mousepos));
+  g_drawingPoly.push(pickOrMakePoint(viewCursor()));
   if (g_drawingPoly.length==4){
 //	if (distSquared2d(g_mousepos,g_drawingPoly[0])<g_snapRadius*g_snapRadius){
 	var [vt0,vt1,vt2,vt3]=g_drawingPoly;
@@ -1010,7 +1100,7 @@ g_pointTool={
   },
   mousedown: function(e){
       console.log("add  point");
-      pt=pickOrMakePoint(g_mousepos);
+      pt=pickOrMakePoint(viewCursor());
       AddPoly(polyFromPoint(pt,getCurrentLabel()));
   },
   mouseup: function(e){
@@ -1179,12 +1269,21 @@ function extrudeTaggedVertices(){
 	}
 }
 
+function screenDeltaToWorld(vc,ofs){
+	return vscale(ofs,1.0/vc.view.zoom);
+}
+//todo - in perspective views, account for dist ..
+function screenDeltaToWorldAt(vc,screenDelta /*, atWorldPos*/){
+	return screenDeltaToWorld(vc,screenDelta);
+}
+// distance from the cursor in a viewport to a world point
+
 g_extrudeTool={
 	name:"extrude",
 	activate:function(e){
 		console.log("extrude polygons");
 		g_drawfeedback=null;
-		g_mouseDelta=vzero();
+		g_mouseScreenDelta=vzero();
 		extrudeTaggedVertices();
 		SetCursor("move");
 	},
@@ -1192,10 +1291,11 @@ g_extrudeTool={
 	},
 	mousepassivemove: function(e){
 		vtc=GetSelectedVertices();
-		console.log("selvtc len=",vtc.length+"mousedelta="+JSON.stringify(g_mouseDelta));
+		console.log("selvtc len=",vtc.length+"mousedelta="+JSON.stringify(g_mouseScreenDelta));
+		worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
 		vtc.forEach(function(val,keypt,map){
 			
-			vaddto(keypt,g_mouseDelta);
+			vaddto(keypt,worldDelta);
 		});
 	},
 	mouseclickup: function(e){PopToolOr(g_selectTool);},
@@ -1206,6 +1306,7 @@ g_extrudeTool={
 		PopToolOr(g_selectTool);
 	}
 }
+
 g_multiSelectDrag=false;
 function multiSelectMouseMove(e) {
 	console.log("multi select mouse move,tool=",g_tool.name);
@@ -1216,11 +1317,13 @@ function multiSelectMouseUp(e){
 	console.log("multi select mouse up\n");
 	var selectedVertices=new Map();
 	foreachVertex(function(v){selectedVertices.set(v,true);});
-	pmin=vmin(g_dragstart,g_mousepos);
-	pmax=vmax(g_dragstart,g_mousepos);
+	vc=viewCursor();
+	pmin=vmin(g_dragstart,g_mousePos);
+	pmax=vmax(g_dragstart,g_mousePos);
 	console.log("bounds:"+JSON.stringify([pmin,pmax]));
 	selectedVertices.forEach(function(val,vt,map){
-		if (inrange(vt.x, pmin.x,pmax.x) && inrange(vt.y,pmin.y,pmax.y)){
+		var spos=worldToScreen(vc.view, vt);
+		if (inrange(spos.x, pmin.x,pmax.x) && inrange(spos.y,pmin.y,pmax.y)){
 			vt.tag=vt.tag?false:true
 		}
 	});
@@ -1234,7 +1337,7 @@ function multiSelectMouseUp(e){
 function multiSelectMouseDown(e) {
 	console.log("multi select click\n");
 	g_multiSelectDrag=true;
-    var pick=pickPolyFeatureAt(g_mousepos);
+    var pick=pickPolyFeatureAt(viewCursor());
     if (pick.poly){
       g_currPoly=pick.poly;
       g_adjustPoint=pick;
@@ -1242,7 +1345,7 @@ function multiSelectMouseDown(e) {
         console.log("move point..");
       }
     }
-	var pt=pickPointAt(g_mousepos);
+	var pt=pickPointAt(viewCursor());
 	if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
 	if (!pt){
 		g_hackMoveTaggedVertices=false;
@@ -1264,6 +1367,7 @@ g_adjustTool={
   mousepassivemove: function(e){
   },
   mousedrag: function(e){
+	vc=viewCursor();
     if (g_adjustPoint){
 		SetCursor("move");
 
@@ -1294,13 +1398,13 @@ g_adjustTool={
 	    if (g_hackMoveTaggedVertices){
 			selectedVertices=GetSelectedVertices();
 			selectedVertices.forEach(function(val,keyvt,map){
-				vaddto(keyvt,g_mouseDelta);
+				vaddto(keyvt,screenDeltaToWorldAt(vc,g_mouseScreenDelta));
 			});
 		} else {
 			// todo fix this to ALL be tag based.
         //move a vertex..
 	   		pointToMove = g_adjustPoint.selPoint;
-			vaddto(pointToMove, g_mouseDelta);
+			vaddto(pointToMove, screenDeltaToWorldAt(vc,g_mouseScreenDelta));
 //			pointToMove.x+=g_mouseDelta.x;
 //			pointToMove.y+=g_mouseDelta.y;
 		}
@@ -1308,7 +1412,7 @@ g_adjustTool={
 	  else if (!g_adjustPoint.edge && !g_adjustPoint.selPoint && g_adjustPoint.pickedPoint) {
         // move the whole poly..
         for (pti=0; pti<pl.points.length;pti++){
-			vaddto(pl.points[pti],g_mouseDelta);
+			vaddto(pl.points[pti],screenDeltaToWorldAt(g_mouseScreenDelta));//needs selection centroid for scaling!
         }
       }
     } else{
@@ -1317,7 +1421,7 @@ g_adjustTool={
 	}
   },
   mousedown: function(e){
-    var pick=pickPolyFeatureAt(g_mousepos);
+    var pick=pickPolyFeatureAt(viewCursor());
     if (pick.poly){
       g_currPoly=pick.poly;
       g_adjustPoint=pick;
@@ -1325,17 +1429,17 @@ g_adjustTool={
         console.log("move point..");
       }
     }
- 	var pt=pickPointAt(g_mousepos);
+ 	var pt=pickPointAt(viewCursor());
 	if (pt && pt.tag){g_hackMoveTaggedVertices=true;}
   },
   mouseclickup: function(e){
 
- 	var pt=pickPointAt(g_mousepos);
+ 	var pt=pickPointAt(viewCursor());
 	if (!pt){
 		g_hackMoveTaggedVertices=false;
-		if (pick.selPoint){
-			pt=pick.selPoint;
-		}
+//		if (pick.selPoint){
+//			pt=pick.selPoint;
+//		}
 	}
 	if (!g_shift) {
 		clearVertexSelectionTags();
@@ -1529,10 +1633,10 @@ document.getElementById("load").onclick=function(){
 function readMousePos(e) {
   var edrect = editor.getBoundingClientRect();
 
-  var opos=g_mousepos;
+  var opos=g_mousePos;
   console.assert(e.clientX && e.clientY);
-  g_mousepos=vfromxy(e.clientX-edrect.left,e.clientY-edrect.top);
-  g_mouseDelta=vsub(g_mousepos, opos);
+  g_mousePos=vfromxy(e.clientX-edrect.left,e.clientY-edrect.top);
+  g_mouseScreenDelta=vsub(g_mousePos, opos);
 //  g_mouseDelta.x=g_mousepos.x-opos.x;
 //  g_mouseDelta.y=g_mousepos.y-opos.y;
 }
@@ -1863,6 +1967,7 @@ function PasteFromClipboard(){
 	console.log("paste/duplicate - no clipboard yet so we paste");
 	// todo: poly mode, vertex mode, edge mode
 	// or poly/vertex/edge mixed selection
+	vc=viewCursor();
 	g_currPoly=null;
 	selPolyMap=new Map();
 	selVertexMap=new Map();
@@ -1886,9 +1991,10 @@ function PasteFromClipboard(){
 		numpts++;
 	});
 	var selCentre=vscale(accumvt,1.0/numpts);
-	var delta=vsub(g_mousepos,selCentre);
+	var screenDelta=vsub(g_mousepos,worldToScreen(vc,selCentre));
+	var worldDelta=screenDeltaToWorldAt(vc,screenDelta);
 	selVertexMap.forEach(function(newvt,keyvt,map){
-		vaddto(newvt,delta);
+		vaddto(newvt,worldDelta);
 	});
 	selPolyMap.forEach(function(val,keypl,map){
 		newpl={points:[],name:keypl.name, color:keypl.color};
@@ -2003,7 +2109,7 @@ editor.addEventListener('mousedown',
 	
 		g_leftmousebutton=true;
 		readMousePos(e);
-		g_dragstart=g_mousepos;
+		g_dragstart=g_mousePos;
 
 		// todo - inherit shift-overide in the tool func?
 		if (isMultiSelect()){
@@ -2024,7 +2130,7 @@ editor.addEventListener('mouseup',   function(e){
 		g_multiSelectDrag=false;
 	}else {
 		// tools can distinguish drag-release from click-release
-		if (distSquared2d(g_dragstart,g_mousepos)>0){
+		if (distSquared2d(g_dragstart,g_mousePos)>0){
 			g_tool.mouseup(e);
 		} else {
 			g_tool.mouseclickup(e);
@@ -2105,7 +2211,7 @@ window.addEventListener('keydown',  function(e){
 
   else if (kc==79){SetTool(g_pointTool)}
   else if (kc==84){SetTool(g_selectTool)}
-  else if (kc==76){SetTool(g_lineTool)}
+  else if (kc==76){SetTool(g_dragLineTool)}
   else if (kc==221){TogglePresetLabel(1);}
   else if (kc==219){TogglePresetLabel(-1);}
   else if (kc==27){g_tool.cancel();}
@@ -2116,6 +2222,11 @@ window.addEventListener('keydown',  function(e){
   }
   else if (kc==190){ToggleCurrentPoly(+1);}
   else if (kc==8){Delete(+1);}
+  else if (kc==187){g_zoom*=1.2;}
+  else if (kc==189){g_zoom/=1.2;}
+
+  var step=40.0/g_zoom;
+  vaddto(g_viewCentre,vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step,0));
 // todo .. parenting, renaming , delete vertex,...
   //readMousePos(e);
   repaint();
