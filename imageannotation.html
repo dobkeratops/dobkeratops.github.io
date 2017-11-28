@@ -1879,6 +1879,9 @@ function readMousePos(e) {
 //  g_mouseDelta.x=g_mousepos.x-opos.x;
 //  g_mouseDelta.y=g_mousepos.y-opos.y;
 }
+editor.addEventListener('ontouchstart',function(e){
+	alert(" touchstart");
+});
 
 editor.addEventListener('mousemove',function(e){
 	readMousePos(e);
