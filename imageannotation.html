@@ -4,29 +4,26 @@
 <style>body{overflow:hidden; width:100%;height:100%;}
 </style>
 <div>
-<button class="button" id="cancel" title="cancel current action">cancel</button>
-<button class="button" id="point" title="add labelled points">(o)point</button>
-<button class="button" id="line" title="line draw tool">(l)line</button>
-<button class="button" id="rect" title="rectangle/bounding-box draw tool">(r)rectangle</button>
-<button class="button" id="poly">(p)polygon</button>
-<button class="button" id="adjust" title="point-move/edge-split tool">(a)adjust</button>
-<button class="button" id="select" title="multi select tool">(t)select</button>
 
+<button class="button" value="" id="b0">b0</button>
+<button class="button" value=""id="b1">b1</button>
+<button class="button" value=""id="b2">b2</button>
+<button class="button" value=""id="b3">b3</button>
+<button class="button" value=""id="b4">b4</button>
+<button class="button" value=""id="b5">b5</button>
+<button class="button" value=""id="b6">b6</button>
+<button class="button" value=""id="b7">b7</button>
+<button class="button" value=""id="b8">b8</button>
+<button class="button" value=""id="b9">b9</button>
+<button class="button" value=""id="b10">b10</button>
+<button class="button" value=""id="b11">b11</button>
 <input class="button" id="currentLabel" value="object"title="current label used for new elements">label</button>
-<input class="button" type="checkbox" id="showLabels" checked>showLabels</input>
-<input class="button" type="checkbox" id="showAllPolys" checked>showAllPolys</input>
-<button class="button" id="newImage">new image</button>
-<button class="button" id="load">load</button>
-<button class="button" id="save">save</button>
-<button class="button" id="help">help</button>
-<button class="button" id="info">info</button>
 
-<div id="presetArea">
 <canvas id="editor" width="100pc" height="100pc">
 </canvas>
 <script>
 
-document.getElementById("help").onclick=function(){alert(
+function Help(){alert(
 "hotkeys:\no\tdraw-points tool\nl\tdraw-line tool\nr\tdraw-rect tool\np\tdraw-poly tool\na\tadjust tool (move points & split edges)\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
 "backspace\tdelete polys or vertices\n"+
 "save\tdownloads current annotations as JSON\n"+
@@ -49,10 +46,7 @@ document.getElementById("help").onclick=function(){alert(
 "'tag' here means 'selected'\n"
 )
 };
-//document.getElementById("prefs").onclick=function(){
-//   if (g_labelColor=="white") { g_labelColor="black";} else {g_labelColor="white";}
-//}
-document.getElementById("info").onclick=function(){
+function Info(){
 	console.log("show info");
 	var info="";
 	
@@ -72,7 +66,7 @@ document.getElementById("info").onclick=function(){
 	visit(g_polys,0);
 	alert(info);
 }
-document.getElementById("newImage").onclick=function(){
+function NewImage(){
 /* confirm overwrite.. shouldn't need when web based.
   if (g_polys.length) {
     if (!confirm("changing URL will lose current polys:"+g_polys.length)){
@@ -150,6 +144,7 @@ var g_viewMode=0;
 // default image to load..
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
+console.log("hello world 109412");
 
 function frameImage(){
   g_zoom = Math.min(editor.width/g_imageWorldSize.x,editor.height/g_imageWorldSize.y);
@@ -918,7 +913,7 @@ function print(txt){
 function printObj(obj){
 	printAt(g_printPos.x,g_printPos.y,JSON.stringify(obj));
 }
-function printObjAt(x,yobj){
+function printObjAt(x,y,obj){
 	printAt(x,y,JSON.stringify(obj));
 }
 
@@ -1015,8 +1010,6 @@ function repaintView(context,vp) {
 }
 
 function drawPolygons(context,vp,polys,parent,sel){
-  g_showLabelNames=document.getElementById("showLabels").checked;
-  g_showAllPolys=document.getElementById("showAllPolys").checked;
   var vct=viewContext(context,vp);
   vct.context=context;
 
@@ -1134,8 +1127,16 @@ function TogglePresetLabel(dir){
   setCurrentLabel(g_presetLabels[g_presetLabelIndex]);
 }
 function ToggleCurrentPoly(dir){
-  console.log("TODO");
-//  g_currentPoly=IncWrap(g_currentPoly,dir,g_polys.length);  
+  if (!g_polys.length){return;}
+  if (!g_currPoly){
+    g_currPoly=g_polys[0];
+  }
+  var pls = getListContainingPoly(g_currPoly);
+  var i=getIndexOfPoly(pls,g_currPoly);
+  i+=dir;
+  if (i<0){i=pls.length-1;}
+  else if (i>=pls.length){i=0;}
+  g_currPoly=pls[i];
   repaint();
 }
 
@@ -1399,6 +1400,13 @@ function getIndexOfPoint(poly,pt){
 	}
 	return -1;
 }
+function getIndexOfPoly(pls,poly){
+	for (var i=0; i<pls.length; i++) {
+		if (pls[i]==poly)
+			return i;
+	}
+	return -1;
+}
 function clearVertexSelectionTags(){
 	for (var i=0; i<g_polys.length;i++){
 		pl=g_polys[i];
@@ -1478,7 +1486,7 @@ function foreachEdgeOfPolygon(f){
 }
 
 
-function extrudeTaggedVertices(){
+function ExtrudeTaggedVertices(){
 	console.log("extrude");
 	var extrudeEdges=[];
 	var exvs=new Map();
@@ -1542,7 +1550,7 @@ g_extrudeTool={
 		console.log("extrude polygons");
 		g_drawfeedback=null;
 		g_mouseScreenDelta=vzero();
-		extrudeTaggedVertices();
+		ExtrudeTaggedVertices();
 		SetCursor("move");
 	},
 	mousedrag: function(e){
@@ -1782,14 +1790,6 @@ function SetTool(tool){
   }
 }
 
-// todo create these+buttons programatically
-document.getElementById("poly").onclick=function(){SetTool(g_polyTool);};
-document.getElementById("line").onclick=function(){SetTool(g_dragLineTool);};
-document.getElementById("point").onclick=function(){SetTool(g_pointTool);};
-document.getElementById("rect").onclick=function(){SetTool(g_hexTool);};
-document.getElementById("adjust").onclick=function(){SetTool(g_adjustTool);};
-document.getElementById("select").onclick=function(){SetTool(g_selectTool);};
-document.getElementById("cancel").onclick=function(){Cancel();};
 
 // JSON dump. TODO - connect to a server etc etc
 
@@ -1837,7 +1837,7 @@ function loadFromText(txt){
    g_polys=inputJSON.polygons;
 }
 
-document.getElementById("save").onclick=function(){
+function Save(){
    filename=prompt("download as","annotations"+g_downloadIndex+".json"); g_downloadIndex+=1;
 //   alert(GetAsJSON());
    download(filename,GetAsJSON());
@@ -1903,7 +1903,7 @@ editor.ondrop=function(ev){
   }
 }
 
-document.getElementById("load").onclick=function(){
+function Load(){
    var txt=prompt("enter JSON annotations");
    if (!txt){return;}
    
@@ -1934,7 +1934,7 @@ function readTouchPos(e){
 	if (e.touches[1]){
 		if (g_secondTouchPos){
 			var opos=g_secondTouchPos;
-			g_secondTouchPos=readTouch(1);
+			g_secondTouachPos=readTouch(1);
 			g_secondTouchDelta=vsub(g_secondTouchPos,opos);
 		}else{
 			g_secondTouchPos=readTouch(1);
@@ -1945,6 +1945,7 @@ function readTouchPos(e){
 	}
 	
 }
+
 editor.addEventListener('touchstart',function(e){
 	// we know it's an ipad.. need bigger tolerance
 	g_snapRadius=12;
@@ -1974,6 +1975,7 @@ editor.addEventListener('touchmove',function(e){
 		editorMouseMoveSub(e);
 	}
 });
+
 
 function multiTouchNav(e){
 	g_drawfeedback=null;
@@ -2536,8 +2538,8 @@ function editorMouseDownSub(e){
 		repaint();
 	};
 g_dragLineDragging=false; // temp hack, fugly.
-editor.addEventListener('mouseup',function(e){g_leftmousebutton=false;readMousePos(e); editorMouseUpSub()});
-
+editor.addEventListener('mouseup',function(e){g_leftmousebutton=false;readMousePos(e); editorMouseUpSub(e)});
+function compose(f1,f2){return function(){f1();f2();}};
 function editorMouseUpSub(e){
 	
 	
@@ -2562,7 +2564,8 @@ function editorMouseUpSub(e){
 			if (isMultiSelect()){
 				multiSelectMouseClickUp(e);
 			}else{		
-				g_tool.mouseclickup(e);
+
+				if (g_tool.mouseclickup){g_tool.mouseclickup(e);};
 			}
 		}
 	}
@@ -2625,6 +2628,118 @@ function Cancel(){
 	if (g_tool){if (g_tool.cancel){g_tool.cancel();repaint()}};
 	
 }
+
+g_nextUiGroup=0;
+var g_firstButton=null;
+function getTopButton(i){
+  return document.getElementById("b"+i);
+}
+function CreateUIGroup(mainName,tooltip,mainfunc,subls) {
+  var btn=document.getElementById("b"+g_nextUiGroup);
+  btn.innerHTML=mainName;
+  btn.title=tooltip;
+  g_nextUiGroup+=1;
+
+  var f=function() {
+    console.log("ui:"+mainName);
+    if (mainfunc){
+      mainfunc();
+    }
+    var i;
+    if (subls){
+    for (i=0; i<subls.length; i++){
+       var sub=subls[i];
+       var sbtn=getTopButton(i+g_nextUiGroup);
+       sbtn.className="subbutton";
+       sbtn.innerHTML=sub[0];
+       var subf=sub[1];
+       var textf=sub[0];
+       sbtn.onclick=compose(subf,repaint);
+//function(){console.log(textf);subf(); repaint();};
+    }
+    for (i=subls.length;i<12-g_nextUiGroup; i++){
+       var sbtn=document.getElementById("b"+(g_nextUiGroup+i));
+       sbtn.onclick=null;
+       sbtn.innerHTML="";
+    }
+    }else{
+      // this is a plain tool, no subtools, so keep existing subtools visible.
+    }
+    repaint();
+  }
+  btn.onclick= function(){
+    for (var i=0; i<g_nextUiGroup; i++) {
+       getTopButton(i).style.background="#e0e0e0";
+    }
+    btn.style.background="#ffffff";
+    f()};
+  if (!g_firstButton && subls){g_firstButton=f;}
+
+}
+function uidone(){
+  g_firstButton();
+}
+
+function DeselectAll(){
+  foreachVertex(function(v){v.tag=false;});
+  repaint();
+}
+
+function SelectConnectedVertices(){
+  var plmap=new Map();
+  foreachVertexOfPolygon(function(vt,pl){
+    if (vt.tag) { plmap.set(pl,true);}
+  });
+  foreachVertexOfPolygon(function(vt,pl){
+    if (plmap.has(pl)){vt.tag=true;}
+  });
+}
+
+function mkset(tool){return function(){SetTool(tool);}};
+
+CreateUIGroup("file",
+  "file management,misc",
+  null,
+  [
+  ["new image",NewImage],
+  ["load",Load],
+  ["save",Save],
+  ["help",Help],
+]);
+
+CreateUIGroup("adjust","adjust polygons by moving vertices and splitting edges", mkset(g_adjustTool),null);
+CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkset(g_pointTool)],["lines",mkset(g_dragLineTool)],["rect",mkset(g_rectTool)],["poly",mkset(g_polyTool)],["oct",mkset(g_octTool)],["cancel",Cancel]]);
+
+CreateUIGroup("vertex",
+  "vertex selection and mesh manipulation tools",
+  mkset(g_selectTool),[
+  ["adjust",mkset(g_adjustTool)],
+  ["subdiv",SubdivideByVertices],
+  ["extrude",function(){PushTool(g_extrudeTool)}],
+  ["seperate",SeperateVertices],
+  ["merge",MergeVertices],
+  ["connected",SelectConnectedVertices],
+  ["deselect",DeselectAll]
+]);
+CreateUIGroup("objects","object list manipulation",
+  null,
+  [ ["parent",mkset(g_parentTool)],
+    ["rename",RenamePoly],
+    ["next",function(){ToggleCurrentPoly(1)}],
+    ["prev",function(){ToggleCurrentPoly(-1)}],
+   ["info",Info]
+  ]
+);
+
+CreateUIGroup("view","view options",null,[
+  ["show polys",function(){g_showAllPolys^=true}],
+  ["show labels",function(){g_showLabelNames^=true}],
+  ["frame all",FrameAll],
+  ["single view",function(){g_viewMode=0}],
+  ["3d view",function(){g_viewMode=2}]
+]);
+uidone();
+
 window.addEventListener('keydown',  function(e){
   kc=e.keyCode;
   console.log("keypress:"+kc);
@@ -2636,7 +2751,7 @@ window.addEventListener('keydown',  function(e){
   if (kc==82){SetTool(g_hexTool)} 
   else if (kc==66){SetTool(g_octTool)}
   else if (kc==65){SetTool(g_adjustTool)}
-  else if (kc==69){PushTool(g_extrudeTool)}
+  else if (kc==69){PushTool(g_extrudeTool);}
   else if (kc==80){
     if (g_shift){ SetTool(g_parentTool);}
 	else SetTool((g_alt)?g_quadstripTool:g_polyTool)
