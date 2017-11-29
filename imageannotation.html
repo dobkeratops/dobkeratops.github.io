@@ -4,11 +4,14 @@
 <style>body{overflow:hidden; width:100%;height:100%;}
 </style>
 <div>
+<button class="button" id="cancel" title="cancel current action">cancel</button>
 <button class="button" id="point" title="add labelled points">(o)point</button>
 <button class="button" id="line" title="line draw tool">(l)line</button>
 <button class="button" id="rect" title="rectangle/bounding-box draw tool">(r)rectangle</button>
 <button class="button" id="poly">(p)polygon</button>
 <button class="button" id="adjust" title="point-move/edge-split tool">(a)adjust</button>
+<button class="button" id="select" title="multi select tool">(t)select</button>
+
 <input class="button" id="currentLabel" value="object"title="current label used for new elements">label</button>
 <input class="button" type="checkbox" id="showLabels" checked>showLabels</input>
 <input class="button" type="checkbox" id="showAllPolys" checked>showAllPolys</input>
@@ -127,6 +130,8 @@ var g_currentPolyOutline="#ffffff";
 var g_promptSevereTools=true;
 var g_shiftIsMultiSelect=true;
 var g_mousePos={};
+var g_secondTouchPos=null;
+var g_secondTouchDelta=null;
 var g_dragstart=null;
 var g_drawfeedback=null;
 var g_polys=[];
@@ -214,7 +219,7 @@ function vdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 function sqr(x){return x*x;}
 function vsqr(v){return vdot(v,v);}
 function vcross2d(a,b){return a.x*b.y-a.y*b.x;}
-function vlength(x){return Math.sqrt(vsqr(a));}
+function vlength(a){return Math.sqrt(vsqr(a));}
 function vdist(a,b){return vlength(vsub(a,b));}
 function vdistSquared(a,b){return vsqr(vsub(a,b));}
 function vcross(a,b){
@@ -313,6 +318,11 @@ function vctLineTo(vct,pos){
 //	console.log("spos="+JSON.stringify(spos));
 	vct.context.lineTo(spos.x,spos.y);
 }
+function vctFillCircle(vct, pos,r) {
+	var spos=worldToScreen(vct.view, pos);
+	vfillcircle(vct.context, spos,r);
+}
+
 
 function polyDiagonalHexFromRect(view,rc) {
   size=vabs(vsub(rc.end,rc.start));
@@ -674,10 +684,10 @@ function keyDelta(key,dec,inc){
 }
 
 function drawFeedbackDrawPoly(context){
-	
+	const drawPolyColor="red";
     if (g_drawingPoly.length>0){
       context.globalAlpha=0.75;
-      context.strokeStyle = "red";
+      context.strokeStyle = drawPolyColor;;
 	  var vc=viewCursor();
       var endpt=pickOrMakePoint(vc);
       if (cursorScreenDistSquared(vc,g_drawingPoly[0])<g_snapRadius*g_snapRadius) {
@@ -692,8 +702,20 @@ function drawFeedbackDrawPoly(context){
         vctLineTo(vct,g_drawingPoly[i]);
       }
       vctLineTo(vct,endpt);
+      context.stroke();
+
+	  context.fillStyle=drawPolyColor;
+	  for (var i=0; i<g_drawingPoly.length; i++){
+		vctFillCircle(vct,g_drawingPoly[i],g_snapRadius/2);
+	  }
+
+	  
+      context.globalAlpha=0.15;
+      context.beginPath();
+      vctMoveTo(vct,endpt);
       vctLineTo(vct,g_drawingPoly[0]);
       context.stroke();
+
     }
     dragFeedbackCrosshair(context);
 }
@@ -881,6 +903,25 @@ function getViewportList(){
 	}
 
 }
+var g_printPos=vzero();
+// debug print helpers.
+function printAt(x,y,txt){
+	context=editor.getContext("2d");
+    context.font = "20px Arial";
+    context.fillText(txt,x,y);
+	context.stroke();
+	g_printPos=vfromxy(x,y+20);
+}
+function print(txt){
+	printAt(g_printPos.x,g_printPos.y,txt);
+}
+function printObj(obj){
+	printAt(g_printPos.x,g_printPos.y,JSON.stringify(obj));
+}
+function printObjAt(x,yobj){
+	printAt(x,y,JSON.stringify(obj));
+}
+
 
 function repaint(){
   var canvas = document.querySelector("canvas");
@@ -1650,7 +1691,7 @@ g_adjustTool={
 	  else if (!g_adjustPoint.edge && !g_adjustPoint.selPoint && g_adjustPoint.pickedPoint) {
         // move the whole poly..
         for (pti=0; pti<pl.points.length;pti++){
-			vaddto(pl.points[pti],screenDeltaToWorldAt(g_mouseScreenDelta));//needs selection centroid for scaling!
+			vaddto(pl.points[pti],screenDeltaToWorldAt(vc,g_mouseScreenDelta));//needs selection centroid for scaling!
         }
       }
     } else{
@@ -1747,6 +1788,8 @@ document.getElementById("line").onclick=function(){SetTool(g_dragLineTool);};
 document.getElementById("point").onclick=function(){SetTool(g_pointTool);};
 document.getElementById("rect").onclick=function(){SetTool(g_hexTool);};
 document.getElementById("adjust").onclick=function(){SetTool(g_adjustTool);};
+document.getElementById("select").onclick=function(){SetTool(g_selectTool);};
+document.getElementById("cancel").onclick=function(){Cancel();};
 
 // JSON dump. TODO - connect to a server etc etc
 
@@ -1878,13 +1921,77 @@ function readMousePos(e) {
 //  g_mouseDelta.x=g_mousepos.x-opos.x;
 //  g_mouseDelta.y=g_mousepos.y-opos.y;
 }
-editor.addEventListener('touchstart',editorMouseDown);
-editor.addEventListener('touchend',editorMouseUp);
-editor.addEventListener('touchmove',editorMouseMove);
 
-editor.addEventListener('mousemove',editorMouseMove);
-function editorMouseMove(e){
-	readMousePos(e);
+function readTouchPos(e){
+	var edrect = editor.getBoundingClientRect();
+	var opos=g_mousePos;
+	function readTouch(i){return vfromxy(e.touches[i].clientX-edrect.left,e.touches[i].clientY-edrect.top)};
+	if (e.touches[0]) {
+		g_mousePos=readTouch(0);	
+		g_mouseScreenDelta=opos?vsub(g_mousePos, opos):vzero();
+	}
+
+	if (e.touches[1]){
+		if (g_secondTouchPos){
+			var opos=g_secondTouchPos;
+			g_secondTouchPos=readTouch(1);
+			g_secondTouchDelta=vsub(g_secondTouchPos,opos);
+		}else{
+			g_secondTouchPos=readTouch(1);
+			g_secondTouchDelta=vzero();
+		}
+	} else{
+		g_secondTouchPos=null;
+	}
+	
+}
+editor.addEventListener('touchstart',function(e){
+	// we know it's an ipad.. need bigger tolerance
+	g_snapRadius=12;
+	readTouchPos(e);
+	g_leftmousebutton=true;	// treat it as LBM?
+							// should we not wait for move,mouseup etc.
+							// and really clear out 'click' behaviour
+	e.preventDefault();
+	editorMouseDownSub(e);
+});
+editor.addEventListener('touchend',function(e){
+	readTouchPos(e);
+	g_leftmousebutton=false;
+	e.preventDefault();
+	editorMouseUpSub(e);
+	}
+);
+g_secondTouchPos;
+editor.addEventListener('touchmove',function(e){
+	readTouchPos(e);
+	e.preventDefault();
+	if (e.touches[1]){
+		multiTouchNav(e);
+		repaint();
+	}
+	else{
+		editorMouseMoveSub(e);
+	}
+});
+
+function multiTouchNav(e){
+	g_drawfeedback=null;
+	vsubto(g_viewCentre,g_mouseScreenDelta);
+	if (g_mouseScreenDelta && g_secondTouchDelta){
+		var fingerDelta=vsub(g_secondTouchPos,g_mousePos);
+	printAt(100,100,"1");
+		var fingerDeltaDelta=vsub(g_secondTouchDelta,g_mouseScreenDelta);
+	printAt(100,100,"4");
+		var newFingerDelta=vsub(vadd(fingerDelta,g_secondTouchDelta),g_mouseScreenDelta);
+		var factor=vlength(newFingerDelta)/vlength(fingerDelta);
+		ZoomByAt(viewCursor(),factor);
+	}
+}
+
+editor.addEventListener('mousemove',function(e){readMousePos(e);editorMouseMoveSub(e)});
+function editorMouseMoveSub(e){
+	
 
 	if (g_multiSelectDrag){
 		console.log("g_multiSelectDrag");
@@ -2406,12 +2513,11 @@ function ViewToggle(){
 function isMultiSelect(){
 	return (g_shift && g_shiftIsMultiSelect);
 }
-editor.addEventListener('mousedown',editorMouseDown);
+editor.addEventListener('mousedown',function(e){readMousePos(e);editorMouseDownSub(e)});
 
-function editorMouseDown(e){
+function editorMouseDownSub(e){
 	
 		g_leftmousebutton=true;
-		readMousePos(e);
 		if (e.button==2){
 			e.preventDefault();
 		} else {
@@ -2430,10 +2536,11 @@ function editorMouseDown(e){
 		repaint();
 	};
 g_dragLineDragging=false; // temp hack, fugly.
-editor.addEventListener('mouseup',editorMouseUp);
-function editorMouseUp(e){
-	g_leftmousebutton=false;
-	readMousePos(e);
+editor.addEventListener('mouseup',function(e){g_leftmousebutton=false;readMousePos(e); editorMouseUpSub()});
+
+function editorMouseUpSub(e){
+	
+	
 //	if (g_multiSelectDrag){
 //		multiSelectMouseDragUp(e);
 //	}else
@@ -2514,7 +2621,10 @@ function ZoomByAt(vc, factor){
 		vmaddto(g_viewCentre,ofs,-1+factor);
 	}
 }
-
+function Cancel(){
+	if (g_tool){if (g_tool.cancel){g_tool.cancel();repaint()}};
+	
+}
 window.addEventListener('keydown',  function(e){
   kc=e.keyCode;
   console.log("keypress:"+kc);
@@ -2559,7 +2669,7 @@ window.addEventListener('keydown',  function(e){
   else if (kc==76){SetTool(g_dragLineTool)}
   else if (kc==221){TogglePresetLabel(1);}
   else if (kc==219){TogglePresetLabel(-1);}
-  else if (kc==27){g_tool.cancel();}
+  else if (kc==27){Cancel();}
   else if (kc==13){RenamePoly();}
   else if (kc==188){ToggleCurrentPoly(-1);}
   else if (kc==77){
