@@ -1,4 +1,4 @@
-1<html>
+<html>
 <link rel="stylesheet" type="text/css" href="style.css">
 <body>
 <style>body{overflow:hidden; width:100%;height:100%;}
@@ -1593,9 +1593,9 @@ function getIndexOfPoint(poly,pt){
 	}
 	return -1;
 }
-function getIndexOfPoly(pls,poly){
-	for (var i=0; i<pls.length; i++) {
-		if (pls[i]==poly)
+function getIndexOfPoly(polys,pl){
+	for (var i=0; i<polys.length; i++) {
+		if (polys[i]==pl)
 			return i;
 	}
 	return -1;
@@ -2362,11 +2362,14 @@ function getListContainingPoly(poly){
 function DeleteCurrentPoly(){
 	console.log("delete a polygon\n");
 	if (!g_currPoly){return;}
-	pls=getListContainingPoly(g_currPoly);
-    if (!MyConfirm("delete poly:"+g_polys[g_currPoly].name)){
-		i=getIndexOf(g_currPoly, pls);
+	var pls=getListContainingPoly(g_currPoly);
+	if (!pls){
+		console.log("could not find list for "+g_currPoly.name);
+	}
+    if (MyConfirm("delete poly:"+g_currPoly.name+"in list of "+(pls?pls.length:1))){
+		var i=getIndexOfPoly(pls,g_currPoly);
 		pls.splice(i,1);
-		g_currPoly=i<pls.length?pls[i]:null;
+		g_currPoly=null;//i<pls.length?pls[i]:null;
 	}
 }
 
