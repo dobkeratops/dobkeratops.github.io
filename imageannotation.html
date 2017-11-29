@@ -4,7 +4,6 @@
 <style>body{overflow:hidden; width:100%;height:100%;}
 </style>
 <div>
-
 <button class="button" value="" id="b0">b0</button>
 <button class="button" value=""id="b1">b1</button>
 <button class="button" value=""id="b2">b2</button>
@@ -17,6 +16,7 @@
 <button class="button" value=""id="b9">b9</button>
 <button class="button" value=""id="b10">b10</button>
 <button class="button" value=""id="b11">b11</button>
+<button class="button" value=""id="b12">b12</button>
 <input class="button" id="currentLabel" value="object"title="current label used for new elements">label</button>
 
 <canvas id="editor" width="100pc" height="100pc">
@@ -1449,7 +1449,7 @@ function foreachVertexSub(polys,f){
 		for (var j=0; j<pl.points.length; j++){
 			f(pl.points[j])
 		}
-		if (pl.polygons){foreachVertexSub(pl,f);}
+		if (pl.polygons){foreachVertexSub(pl.polygons,f);}
 	}
 }
 function foreachVertex(f){
@@ -2182,12 +2182,16 @@ function SeperateVertices(){
 	}
 }
 
-function DeleteVertices(){
+function DeleteVerticesSub(polys){
 	console.log("delete vertices\n");
 	var newpls=[];
-	for (var i=0;i<g_polys.length; i++){
-		var pl=g_polys[i];
-		var newpl={points:[],color:pl.color,name:pl.name};
+
+	for (var i=0;i<polys.length; i++){
+		var pl=polys[i];
+        if (pl.polygons){
+           pl.polygons=DeleteVerticesSub(pl.polygons);
+        }
+		var newpl={points:[],color:pl.color,name:pl.name, polygons:pl.polygons};
 		for (var j=0; j<pl.points.length; j++){
 			vt=pl.points[j];
 			if (!vt.tag){
@@ -2197,11 +2201,18 @@ function DeleteVertices(){
 		if (newpl.points.length>=0){
 			newpls.push(newpl);
 		}
+        
 	}
-	g_polys=newpls;
-	repaint();
+	return newpls;
 }
+function DeleteVertices(){
+  var num=0;
+  foreachVertex(function (v){if (v.tag){num+=1;}});
+  if (!MyConfirm("delete "+num+" vertices?")){return;}
 
+  g_polys=DeleteVerticesSub(g_polys);
+  repaint();
+}
 // context sensitive delete.
 function Delete(){
 	console.log("context sensitive delete\n");
@@ -2657,7 +2668,7 @@ function CreateUIGroup(mainName,tooltip,mainfunc,subls) {
        sbtn.onclick=compose(subf,repaint);
 //function(){console.log(textf);subf(); repaint();};
     }
-    for (i=subls.length;i<12-g_nextUiGroup; i++){
+    for (i=subls.length;i<13-g_nextUiGroup; i++){
        var sbtn=document.getElementById("b"+(g_nextUiGroup+i));
        sbtn.onclick=null;
        sbtn.innerHTML="";
@@ -2713,13 +2724,13 @@ CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkse
 CreateUIGroup("vertex",
   "vertex selection and mesh manipulation tools",
   mkset(g_selectTool),[
-  ["adjust",mkset(g_adjustTool)],
   ["subdiv",SubdivideByVertices],
   ["extrude",function(){PushTool(g_extrudeTool)}],
   ["seperate",SeperateVertices],
   ["merge",MergeVertices],
   ["connected",SelectConnectedVertices],
-  ["deselect",DeselectAll]
+  ["deselect",DeselectAll],
+  ["delete",DeleteVertices],
 ]);
 CreateUIGroup("objects","object list manipulation",
   null,
@@ -2727,7 +2738,8 @@ CreateUIGroup("objects","object list manipulation",
     ["rename",RenamePoly],
     ["next",function(){ToggleCurrentPoly(1)}],
     ["prev",function(){ToggleCurrentPoly(-1)}],
-   ["info",Info]
+   ["info",Info],
+   ["delete",DeleteCurrentPoly],
   ]
 );
 
