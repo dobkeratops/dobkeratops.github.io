@@ -1131,7 +1131,7 @@ function ToggleCurrentPoly(dir){
   if (!g_currPoly){
     g_currPoly=g_polys[0];
   }
-  var pls = getListContainingPoly(g_currPoly);
+  var pls = getListContainingPoly(g_currPoly,g_polys);
   var i=getIndexOfPoly(pls,g_currPoly);
   i+=dir;
   if (i<0){i=pls.length-1;}
