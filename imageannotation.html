@@ -22,6 +22,7 @@
 <canvas id="editor" width="100pc" height="100pc">
 </canvas>
 <script>
+console.log("hello world 109412");
 
 function Help(){alert(
 "hotkeys:\no\tdraw-points tool\nl\tdraw-line tool\nr\tdraw-rect tool\np\tdraw-poly tool\na\tadjust tool (move points & split edges)\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
@@ -152,7 +153,6 @@ var g_viewMode=0;
 // default image to load..
 g_img.src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Queen_Street_NOTL_1.jpg/1920px-Queen_Street_NOTL_1.jpg";
 g_img.ready=false;
-console.log("hello world 109412");
 
 function frameImage(){
   g_zoom = Math.min(editor.width/g_imageWorldSize.x,editor.height/g_imageWorldSize.y);
@@ -1622,7 +1622,10 @@ g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
   g_drawingPoly.push(pickOrMakePoint(viewCursor()));
   if (g_drawingPoly.length==4){
 //	if (distSquared2d(g_mousepos,g_drawingPoly[0])<g_snapRadius*g_snapRadius){
-	var [vt0,vt1,vt2,vt3]=g_drawingPoly;
+	var vt0=g_drawingPoly[0];
+	var vt1=g_drawingPoly[1];
+	var vt2=g_drawingPoly[2];
+	var vt3=g_drawingPoly[3];
 	  console.log("add quadstrip poly..");
 	  // if given degeneracy.. make a tri
 	  if (vt2==vt3){
@@ -1712,7 +1715,7 @@ function ClearVertexSelectionTags(){
 
 g_selectTool={
 	name:"select",
-	activate(e){
+	activate:function(e){
 	    g_drawfeedback=drawFeedbackSelectTool;
 		SetCursor("default");
 	},
@@ -1995,7 +1998,8 @@ g_adjustTool={
         console.log("move tool-split edge.");
 		ClearVertexSelectionTags();
         var pl=g_adjustPoint.poly;
-        var [edgeStart,edgeEnd]=g_adjustPoint.edge;
+        var edgeStart=g_adjustPoint.edge[0];
+        var edgeEnd=g_adjustPoint.edge[1];
         newPt=g_adjustPoint.pickedPoint;//vaverage(edgeStart,edgeEnd);
 
         //newPt=g_mousepos;
