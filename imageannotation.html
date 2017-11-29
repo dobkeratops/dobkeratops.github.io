@@ -643,7 +643,8 @@ function pickPolyFeatureAt(viewcursor) {
 				var eve=pl.points[pti1];
 				var edgeCentre=vaverage(evs,eve);
 				var d2=cursorScreenDistSquared(viewcursor,edgeCentre);
-				if (d2<=minDist2){
+				//TWEAK: edge-split operations require the cursor closer to the edge- much better on touchscreens
+				if (d2<=minDist2 && d2 < g_snapRadius*g_snapRadius){
 					minDist2=d2;
 					picked.poly=pl;
 					picked.edge=[evs,eve];
@@ -1296,7 +1297,34 @@ function makeDrawToolVariant(_name,drawFn,rclickfn){
 	};
 	return tool;
 }
+function TranslateVerticesByDrag(){
+	worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
+	vtc=GetSelectedVertices();
+	vtc.forEach(function(val,vt,map){
+		vaddto(vt,worldDelta);
+	});
+}
 
+function makeTransformToolVariant(_name,transFn,rclickfn){
+	tool={
+		name:_name,
+		activate:function(e){
+			g_drawfeedback=dragFeedbackTransform;
+			SetCursor("move");
+			return true;
+		},
+		passivemove:function(e){
+			console.log("transform passive move");
+		},
+		mousedrag:function(e){
+			console.log("transform drag");
+			TranslateVerticesByDrag()
+		}
+	}
+	return tool;
+}
+
+g_translateTool=makeTransformToolVariant("translate",null,null);
 g_polyTool=makeDrawToolVariant(
 	"polygon",
 	function(e){
@@ -1481,10 +1509,16 @@ function foreachEdgeOfPolygonSub(polys,f){
 		if (pl.polygons){foreachEdgeOfPolygonSub(pl.polygons,f);};
 	}
 }
+
 function foreachEdgeOfPolygon(f){
 	foreachEdgeOfPolygonSub(g_polys,f);
 }
 
+function Extrude(){
+	ExtrudeTaggedVertices();
+	// todo- 'push tool' sets yet another sub UI mode?
+	SetTool(g_translateTool);
+}
 
 function ExtrudeTaggedVertices(){
 	console.log("extrude");
@@ -1544,28 +1578,47 @@ function screenDeltaToWorldAt(vc,screenDelta /*, atWorldPos*/){
 }
 // distance from the cursor in a viewport to a world point
 
+function ToggleVertexTag(){
+	var pt=pickPointAt(viewCursor());
+	if (pt){
+		pt.tag=pt.tag?false:true;
+	}
+}
+
+g_extruded=false;
 g_extrudeTool={
 	name:"extrude",
 	activate:function(e){
-		console.log("extrude polygons");
-		g_drawfeedback=null;
+		console.log("extrude tool");
+		g_drawfeedback=drawFeedbackPickPoint;
 		g_mouseScreenDelta=vzero();
-		ExtrudeTaggedVertices();
 		SetCursor("move");
+		g_extruded=false;
 	},
 	mousedrag: function(e){
+		if (!g_extruded){
+			console.log("extrude step..");
+			ExtrudeTaggedVertices();
+			g_extruded=true;
+		}
+		TranslateVerticesByDrag();
 	},
 	mousepassivemove: function(e){
-		vtc=GetSelectedVertices();
+/*		vtc=GetSelectedVertices();
 //		console.log("selvtc len=",vtc.length+"mousedelta="+JSON.stringify(g_mouseScreenDelta));
 		worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
 		vtc.forEach(function(val,keypt,map){
 			
 			vaddto(keypt,worldDelta);
 		});
+*/
 	},
-	mouseclickup: function(e){PopToolOr(g_selectTool);},
-	mouseup: function(e){PopToolOr(g_selectTool);},
+	mouseclickup: function(e){
+		ToggleVertexTag();
+	},
+	mouseup: function(e){
+		//PopToolOr(g_selectTool); mechanism for restore
+		g_extruded=false;},
 	mousedown: function(e){
 	},
 	cancel: function(e){
@@ -2089,7 +2142,7 @@ function DeleteCurrentPoly(){
 	console.log("delete a polygon\n");
 	if (!g_currPoly){return;}
 	pls=getListContainingPoly(g_currPoly);
-    if (!MyConfirm("delete poly:"+g_polys[g_currentPoly].name)){
+    if (!MyConfirm("delete poly:"+g_polys[g_currPoly].name)){
 		i=getIndexOf(g_currPoly, pls);
 		pls.splice(i,1);
 		g_currPoly=i<pls.length?pls[i]:null;
@@ -2106,7 +2159,9 @@ function MergeVertices(){
 	var accum=vzero();
 	var total=0;
 	accum.tag=true;
-	foreachVertex(function(v){ if (v.tag){vaddto(accum,v);total+=1;}});
+	var selvt=GetSelectedVertices();
+	selvt.forEach(function(v,vt,m){ total+=1; vaddto(accum,vt);});
+//	foreachVertex(function(v){ if (v.tag){vaddto(accum,v);total+=1;}});
 	var newpolys=[];
 	if (total>0){
 		console.log("vertices to merge:"+total);
@@ -2418,7 +2473,11 @@ function SplitByTaggedVertices(newpls,pl){
 }
 
 function SubdivideByVertices(){
+	vtc=GetSelectedVertices();
 	g_polys=SubdivideByVerticesSub(g_polys);
+	vtc.forEach(function(val,pt,map){
+		pt.tag=false;
+	});
 }
 function SubdivideByVerticesSub(polys){
 	// every edge- potentially split in the middle.
@@ -2452,6 +2511,7 @@ function SubdivideByVerticesSub(polys){
 			edge=edgeMapGetOrCreate(edgemap,vs,ve);
 			if (edgeMidPts.has(edge)) continue;		
 			var midpt=vaverage(vs,ve);
+			midpt.tag=true;
 			edgeMidPts.set(edge, midpt);
 		}
 	}
@@ -2725,7 +2785,7 @@ CreateUIGroup("vertex",
   "vertex selection and mesh manipulation tools",
   mkset(g_selectTool),[
   ["subdiv",SubdivideByVertices],
-  ["extrude",function(){PushTool(g_extrudeTool)}],
+  ["extrude",mkset(g_extrudeTool)],
   ["seperate",SeperateVertices],
   ["merge",MergeVertices],
   ["connected",SelectConnectedVertices],
