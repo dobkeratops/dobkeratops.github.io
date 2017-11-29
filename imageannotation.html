@@ -49,6 +49,9 @@ function Help(){alert(
 "'tag' here means 'selected'\n"
 )
 };
+function consolejson(x){
+	console.log(JSON.stringify(x));
+}
 function Info(){
 	console.log("show info");
 	var info="";
@@ -129,6 +132,7 @@ var g_ctrlIsMultiSelect=true;
 var g_mousePos={};
 var g_secondTouchPos=null;
 var g_secondTouchDelta=null;
+var g_enableSplitToDraw;
 var g_dragstart=null;
 var g_drawfeedback=null;
 var g_polys=[];
@@ -216,6 +220,7 @@ function vscale(a,f){return {x:a.x*f, y:a.y*f, z:a.z*f}};
 function vmulElem(a,b){return {x:a.x*b.x, y:a.y*b.y, z:a.z*b.z}};
 function vdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 function sqr(x){return x*x;}
+function clamp(lo,hi,x){return Math.max(lo,Math.min(hi,x));}
 function vsqr(v){return vdot(v,v);}
 function vcross2d(a,b){return a.x*b.y-a.y*b.x;}
 function vlength(a){return Math.sqrt(vsqr(a));}
@@ -601,12 +606,26 @@ function pickOrMakePoint(vcursor){
   if (vt) {return vt;}
   // makes a free point assuming it will be used.
   return vcursor.worldpos;
-//  return vfromxy(cursorPt.x, cursorPt.y);
-
-//  newpl=polyFromPoint(cursorPt,"");
-//  AddPoly(newpl);
-//  return newpl.points[0];
 }
+
+function pickOrMakePointEdgeSplit(vc){
+	var pick=pickPolyFeatureAt(vc,g_snapRadius*2);
+	if (pick.pickedPoint){
+		// if it was an edge split.. perform the split
+		if (pick.edge){
+			foreachPolygon(function(pl){
+				if (PolyHasEdge(pl, pick.edge[0],pick.edge[1])){
+					console.log("split edge of "+pl.name);
+					splitEdgeOfPoly(pl, pick.edge[0],pick.edge[1], pick.pickedPoint);
+				}
+			});
+		}
+		return pick.pickedPoint;
+	}
+	return vc.worldpos;
+}
+
+
 
 function IsVisible(pl){
    if (g_showAllPolys){return true;}
@@ -614,13 +633,27 @@ function IsVisible(pl){
 }
 
 function pickPolyAt(viewcursor){
-	var picked=pickPolyFeatureAt(viewcursor);
+	var picked=pickPolyFeatureAt(viewcursor,100000.0);
 	if (picked){
 		return picked.poly;
 	}
 	return null;
 }
-function pickPolyFeatureAt(viewcursor) {
+var g_freeEdgeSplit=true;
+
+function GetEdgeSplitPoint(vs,ve, pt){
+	if (!g_freeEdgeSplit){
+		return vaverage(evs,eve);
+	}
+	var edgev=vsub(ve,vs);
+	var edgelen=vlength(edgev);
+	var edgeAxis=vscale(edgev,1.0/edgelen);
+	var dp=vdot(vsub(pt,vs),edgeAxis);
+	var edgef=(dp>edgelen)?edgelen:(dp<0.0)?0.0:dp;
+	return vmadd(vs,edgeAxis,edgef);
+	
+}
+function pickPolyFeatureAt(viewcursor,maxdist) {
 	var picked={
 		selPoint:null,
 		poly:null,
@@ -628,7 +661,7 @@ function pickPolyFeatureAt(viewcursor) {
 		edgeFraction:0.0,
 		pickedPoint:null
 	};
-	var minDist2=10000*10000;
+	var minDist2=sqr(maxdist);
 	var edgeSplitRadius = g_snapRadius*g_snapRadiusEdgeSplitFactor;
 
 	var pickPolyFeatureAtSub=function(polys) {
@@ -652,19 +685,28 @@ function pickPolyFeatureAt(viewcursor) {
 				pti1=(pti+1)%pl.points.length;
 				var evs=pl.points[pti];
 				var eve=pl.points[pti1];
-				var edgeCentre=vaverage(evs,eve);
-				var d2=cursorScreenDistSquared(viewcursor,edgeCentre);
+				var edgeSplitPoint=GetEdgeSplitPoint(evs,eve,viewcursor.worldpos);
+				var d2s=cursorScreenDistSquared(viewcursor,evs);
+				var d2e=cursorScreenDistSquared(viewcursor,eve);
+				//reject if the edge's vertices are closer than threshold
+				// an edge split would otherwise create an potential exact match
+				if (d2s<sqr(g_snapRadius*2) || d2e<sqr(g_snapRadius*2)){
+					continue;
+				}
+//				console.log(JSON.stringify({pt:viewcursor.worldpos,esp:edgeSplitPoint}));
+				var d2=cursorScreenDistSquared(viewcursor,edgeSplitPoint);
 				//TWEAK: edge-split operations require the cursor closer to the edge- much better on touchscreens
 				if (d2<=minDist2 && d2 < edgeSplitRadius*edgeSplitRadius){
 					minDist2=d2;
 					picked.poly=pl;
 					picked.edge=[evs,eve];
 					picked.selPoint=null;
-					picked.pickedPoint=edgeCentre;
+					picked.pickedPoint=edgeSplitPoint;
 				} 
 			}    
 
 			// pick polygon vertex?
+			// - must override split edge
 			for (var pti=0; pti<pl.points.length; pti++) {
 				pt=pl.points[pti];
 				var d2=cursorScreenDistSquared(viewcursor,pt);
@@ -689,14 +731,29 @@ function pickPolyFeatureAt(viewcursor) {
 function keyDelta(key,dec,inc){
 	return (key==dec)?-1:(key==inc)?1:0;
 }
-
+function drawNewCrosshair(context,crossHairPos){
+	context.fillStyle="black";
+	context.globalAlpha=0.25;
+	vfillcircle(context,crossHairPos,g_snapRadius);
+	context.globalAlpha=0.75;
+	context.fillStyle="white";
+	drawCrosshair(context,crossHairPos,g_snapRadius*2);
+	vdrawcircle(context,crossHairPos,g_snapRadius);
+}
 function drawFeedbackDrawPoly(context){
 	const drawPolyColor="red";
+	var vc=viewCursor();
+	var pick=pickPolyFeatureAt(vc,g_snapRadius*2);
+//	consolejson(pick);
+	var endpt=(pick.pickedPoint)?pick.pickedPoint:pickOrMakePoint(vc);
+//	drawPointSnapCrosshair(context,vc,g_snapRadius);todo 'Sub' of this
+	var crossHairPos=endpt?worldToScreen(vc.view,endpt):viewcursor.screenpos;
+	drawNewCrosshair(context,crossHairPos);
+
     if (g_drawingPoly.length>0){
       context.globalAlpha=0.75;
       context.strokeStyle = drawPolyColor;;
-	  var vc=viewCursor();
-      var endpt=pickOrMakePoint(vc);
+
       if (cursorScreenDistSquared(vc,g_drawingPoly[0])<g_snapRadius*g_snapRadius) {
         endpt=g_drawingPoly[0];
         context.strokeStyle = g_currentPolyOutline;
@@ -722,9 +779,8 @@ function drawFeedbackDrawPoly(context){
       vctMoveTo(vct,endpt);
       vctLineTo(vct,g_drawingPoly[0]);
       context.stroke();
-
     }
-    dragFeedbackCrosshair(context);
+    //dragFeedbackCrosshair(context);
 }
 function drawFeedbackDrawQuadstrip(context){
     if (g_drawingPoly.length>0){
@@ -765,10 +821,12 @@ function polyCentre(poly){
 
 function drawFeedbackPickPolyPoint(ctx) {
 	ctx.globalAlpha=0.5;
-	picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(viewCursor());
+	picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(viewCursor(),100000.0);
 	if (picked.poly) {
 		var spos=worldToScreen(viewCursor().view,picked.pickedPoint);
-		vfillcircle(ctx,spos,g_snapRadius);
+		drawNewCrosshair(ctx,spos);
+
+//		vfillcircle(ctx,spos,g_snapRadius);
 	}
 }
 function drawFeedbackPickPoint(ctx) {
@@ -776,7 +834,8 @@ function drawFeedbackPickPoint(ctx) {
 	var pt=pickPointAt(viewCursor());
 	if (pt){
 		var spos=worldToScreen(viewCursor().view,pt);
-		vfillcircle(ctx,spos,g_snapRadius);
+		drawNewCrosshair(ctx,spos);
+//		vfillcircle(ctx,spos,g_snapRadius);
 	}
 }
 
@@ -960,20 +1019,43 @@ function PolyHasPoint(pl,vt){
 	}
 	return false;
 }
-
-function doesEdgeSplitPolySub(polys,vs,ve){
-	var i=0;
-	for (i=0; i<polys.length; i++){
-		var pl=polys[i];
-		var j;
+function PolyHasBothVertices(pl,vs,ve){
+	for (var plvti=0; plvti<pl.points.length; plvti++){
 		var has_vs=false;
 		var has_ve=false;
+		// 
 		for (j=0; j<pl.points.length; j++){
 			var pt=pl.points[j];
 			if (pt==vs) {has_vs=true;}
 			if (pt==ve) {has_ve=true;}
 		}
 		if (has_vs && has_ve){
+			return pl;
+		}
+
+	}
+	return false;
+}
+function PolyHasEdge(pl,vs,ve){
+	for (var plvti=0; plvti<pl.points.length; plvti++){
+		// 
+		for (j=0; j<pl.points.length; j++){
+			var pt=pl.points[j];
+			var pt1=pl.points[(j+1)%pl.points.length];
+			if ((pt==vs && pt1==ve)||(pt==ve && pt1==vs)){
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+function doesEdgeSplitPolySub(polys,vs,ve){
+	var i=0;
+	for (i=0; i<polys.length; i++){
+		var pl=polys[i];
+		var j;
+		if (PolyHasBothVertices(pl, vs,ve)){
 			return pl;
 		}
 		if (pl.polygons){ 
@@ -1298,7 +1380,7 @@ function lastIsNot(array,x){
 	return (array[array.length-1]!=x);
 }
 g_dragLineTool={
-	name:"draw edges",
+	name:"deprecated draw edges",
 	activate: function(e){
 		g_drawfeedback=drawFeedbackDrawPoly;
 		g_drawingPoly=[];
@@ -1319,19 +1401,7 @@ g_dragLineTool={
 	}
 	g_drawingPoly.push(ept);
 	if (g_drawingPoly.length==2){
-		var vstart=g_drawingPoly[0];
-		var vend=g_drawingPoly[1];
-		
-
-		var pl=DoesEdgeSplitPoly(vstart,vend);
-		// either add an edge or a polygon
-		if (pl){
-			console.log("splitting poly by new edge -"+pl.name+" vertices="+pl.points.length);
-			SplitPolyByEdge(pl,vstart,vend);
-		} else {
-			console.log("adding new edge as object\n");
-			AddPoly({points:[vstart,vend], name:getCurrentLabel()});
-		}
+		AddEdgeMaybeSplitPoly(g_drawingPoly[0],g_drawingPoly[1]);
 		// todo - linestrip mode.. right-click??
 		g_drawingPoly=[];
 	}
@@ -1355,7 +1425,6 @@ g_dragLineTool={
   cancel:function(){
       g_dragstart=null;//g_mousePos;
 		g_drawingPoly=[];
-      g_drawfeedback=dragFeedbackCrosshair;
   }
 };
 
@@ -1364,7 +1433,7 @@ function makeDrawToolVariant(_name,drawFn,rclickfn){
 	tool={
 	  name:_name,
 	  activate: function(e){
-			g_drawfeedback=dragFeedbackCrosshair;
+			g_drawfeedback=drawFeedbackDrawPoly;
 			g_drawingPoly=[];
 			SetCursor("crosshair");
 			return true;
@@ -1375,6 +1444,7 @@ function makeDrawToolVariant(_name,drawFn,rclickfn){
 	  },
 	  mouserightclick:rclickfn,
 	  cancel:function(){
+      g_dragstart=null;//g_mousePos;
 		 g_drawingPoly=[];
 	  }
 	};
@@ -1502,7 +1572,8 @@ g_polyTool=makeDrawToolVariant(
 				return;
 			}
 		}
-		g_drawingPoly.push(pickOrMakePoint(viewCursor()));
+		
+		g_drawingPoly.push(pickOrMakePointEdgeSplit(viewCursor()));
 	},
 	function(e){
 		console.log("finish poly by rclick");
@@ -1511,6 +1582,39 @@ g_polyTool=makeDrawToolVariant(
 		g_drawingPoly=[];
 	}
 );
+function AddEdgeMaybeSplitPoly(vstart,vend){
+	// it might split many polys.
+	var pl=DoesEdgeSplitPoly(vstart,vend);
+	// either add an edge or a polygon
+	if (pl){
+		console.log("splitting poly by new edge -"+pl.name+" vertices="+pl.points.length);
+		SplitPolyByEdge(pl,vstart,vend);
+	} else {
+		console.log("adding new edge as object\n");
+		AddPoly({points:[vstart,vend], name:getCurrentLabel()});
+	}
+}
+
+g_lineTool=makeDrawToolVariant(
+	"draw edge",
+	function(e){
+		console.log("add draw point");
+		g_drawingPoly.push(pickOrMakePointEdgeSplit(viewCursor()));
+		if (g_drawingPoly.length==2){
+			AddEdgeMaybeSplitPoly(g_drawingPoly[0],g_drawingPoly[1]);
+//			AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+			g_drawingPoly=[];
+		}
+	},
+	function(e){
+		console.log("finish poly by rclick - continue line strip");
+		g_drawingPoly.push(pickOrMakePointEdgeSplit(viewCursor()));
+		AddEdgeMaybeSplitPoly(g_drawingPoly[0],g_drawingPoly[1]);
+//		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+		g_drawingPoly[0]=g_drawingPoly[1];
+	}
+);
+
 
 g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
   g_drawfeedback=drawFeedbackDrawQuadstrip;
@@ -1567,8 +1671,8 @@ function splitEdgeOfPoly(poly, v0,v1, vmid) {
 	// 2 types of edgeplit, if the poly is just an edge, make 2 polys with new vertex
 	// else split in the boundary
 	if (poly.points.length==2){
-	    if (poly.points[0]==v0 && poly.points[1]==v1 || poly.points[1]==v0 && poly.points[0]==v1 ) {
-			console.log("splitEdgeOfPoly-do edge split");
+	    if ((poly.points[0]==v0 && poly.points[1]==v1) || (poly.points[1]==v0 && poly.points[0]==v1) ) {
+			console.log("splitEdgeOfPoly-do edge split of"+poly.name);
 			var splitpoly=g_adjustPoint.poly;
 			poly.points[0]=v0;
 			poly.points[1]=vmid;
@@ -1835,7 +1939,7 @@ function multiSelectMouseDragUp(e){
 
 function multiSelectMouseDown(e) {
 	console.log("multi select click\n");
-/*    var pick=pickPolyFeatureAt(viewCursor());
+/*    var pick=pickPolyFeatureAt(viewCursor(),100000.0);
     if (pick.poly){
       g_currPoly=pick.poly;
       g_adjustPoint=pick;
@@ -1892,7 +1996,7 @@ g_adjustTool={
 		ClearVertexSelectionTags();
         var pl=g_adjustPoint.poly;
         var [edgeStart,edgeEnd]=g_adjustPoint.edge;
-        newPt=vaverage(edgeStart,edgeEnd);
+        newPt=g_adjustPoint.pickedPoint;//vaverage(edgeStart,edgeEnd);
 
         //newPt=g_mousepos;
         // step through all the polys again, because the vertices/edge may be shared.
@@ -1933,7 +2037,7 @@ g_adjustTool={
 	}
   },
   mousedown: function(e){
-    var pick=pickPolyFeatureAt(viewCursor());
+    var pick=pickPolyFeatureAt(viewCursor(),100000.0);
     if (pick.poly){
       g_currPoly=pick.poly;
       g_adjustPoint=pick;
@@ -2289,7 +2393,7 @@ function editorMouseMoveSub(e){
 }
 
 editor.addEventListener("wheel", function(e){
-	console.log("mouse wheel event"+JSON.stringify(e)+e.deltaY);
+	//console.log("mouse wheel event"+JSON.stringify(e)+e.deltaY);
 	var factor=1.0;
 	if (e.deltaY>0){ factor=1.08;
 	} else if (e.deltaY<0){
@@ -2904,7 +3008,9 @@ function editorMouseUpSub(e){
 			if (isMultiSelect() || g_multiSelectDrag){
 				multiSelectMouseDragUp(e);
 			} else{
-				g_tool.mousedragend(e);
+				if (g_tool.mousedragend){
+					g_tool.mousedragend(e);
+				}
 			}
 		} else {
 			if (isMultiSelect()){
@@ -3069,7 +3175,7 @@ CreateUIGroup("file",
 ]);
 
 CreateUIGroup("adjust","adjust polygons by moving vertices and splitting edges", mkset(g_adjustTool),null);
-CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkset(g_pointTool)],["lines",mkset(g_dragLineTool)],["rect",mkset(g_rectTool)],["poly",mkset(g_polyTool)],["oct",mkset(g_octTool)],["cancel",Cancel]]);
+CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkset(g_pointTool)],["lines",mkset(g_lineTool)],["rect",mkset(g_rectTool)],["poly",mkset(g_polyTool)],["oct",mkset(g_octTool)],["cancel",Cancel]]);
 
 CreateUIGroup("vertex",
   "vertex selection and mesh manipulation tools",
@@ -3148,7 +3254,7 @@ window.addEventListener('keydown',  function(e){
 
   else if (kc==79){SetTool(g_pointTool)}
   else if (kc==84){SetTool(g_selectTool)}
-  else if (kc==76){SetTool(g_dragLineTool)}
+  else if (kc==76){SetTool(g_lineTool)}
   else if (kc==221){TogglePresetLabel(1);}
   else if (kc==219){TogglePresetLabel(-1);}
   else if (kc==27){Cancel();}
@@ -3170,8 +3276,6 @@ window.addEventListener('keydown',  function(e){
   vaddto(g_viewCentre,screenDeltaToWorld({cursor:g_mousePos,view:vp},sdelta));
 // todo .. parenting, renaming , delete vertex,...
   //readMousePos(e);
-  console.log("interestpoint="+JSON.stringify(g_viewCentre));
-	console.log("in scre"+JSON.stringify(vp));
   repaint();
 },false);
 
@@ -3190,7 +3294,7 @@ g_example1polys=[{"points":[{"x":824.75,"y":464.515,"tag":false},{"x":822.5,"y":
 
 
 },{"points":[{"x":216,"y":510,"tag":false},{"x":367,"y":503,"tag":false}],"name":"kerb edge","color":"#c08000"},{"points":[{"x":502,"y":495,"tag":false},{"x":631,"y":488,"tag":false}],"name":"kerb edge","color":"#80c000"},{"points":[{"x":839,"y":354,"tag":false},{"x":836,"y":198,"tag":false}],"name":"lamp post","color":"#0080c0"},{"points":[{"x":479,"y":377.43,"tag":false},{"x":515.75,"y":357.21500000000003,"tag":false},{"x":551.5,"y":357,"tag":false},{"x":596,"y":376.25,"tag":false},{"x":608.75,"y":416.58},{"x":598.5,"y":441.90999999999997,"tag":false},{"x":564,"y":452.57,"tag":false},{"x":515.5,"y":455,"tag":false},{"x":485,"y":442.75,"tag":false}],"name":"bush","color":"#00ff00"},{"points":[{"x":322,"y":401}],"name":"head","color":"#00c080"},{"points":[{"x":276,"y":390}],"name":"head","color":"#8000c0"},{"points":[{"x":903,"y":428}],"name":"wing mirror","color":"#c08000"}];
-g_polys=g_example1polys;
+g_polys=[];
 repaint();
 
 </script>
