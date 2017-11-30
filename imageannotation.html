@@ -134,8 +134,7 @@ var g_mousePos={};
 var g_secondTouchPos=null;
 var g_secondTouchDelta=null;
 var g_enableSplitToDraw;
-var g_dragstart=null;
-var g_drawfeedback=null;
+var g_dragstartpos=null;
 var g_polys=[];
 var g_tool;
 var g_img = new window.Image();
@@ -327,6 +326,12 @@ function vctFillCircle(vct, pos,r) {
 	vfillcircle(vct.context, spos,r);
 }
 
+function Resize(){
+  editor.width=window.innerWidth;
+  editor.height=window.innerHeight;
+	g_width=editor.width;
+	g_height=editor.height;
+}
 
 function polyDiagonalHexFromRect(view,rc) {
   size=vabs(vsub(rc.end,rc.start));
@@ -491,24 +496,34 @@ function vmoveto(context,v){
 function vlineto(context,v){
 	context.lineTo(v.x,v.y);
 }
+function vrect(ctx,topLeft,bottomRight){
+	ctx.moveTo(topLeft.x,topLeft.y);
+    ctx.lineTo(bottomRight.x,topLeft.y);
+    ctx.lineTo(bottomRight.x,bottomRight.y);
+    ctx.lineTo(topLeft.x,bottomRight.y);
+    ctx.lineTo(topLeft.x,topLeft.y);
+}
 
-function dragFeedbackRectSub(context,color,alpha){
+function dragFeedbackDragRectSub(context,color,alpha){
     context.globalAlpha=alpha;
     context.fillStyle = color;
     context.beginPath();
-	context.moveTo(g_dragstart.x,g_dragstart.y);
-    context.lineTo(g_mousePos.x,g_dragstart.y);
-    context.lineTo(g_mousePos.x,g_mousePos.y);
-    context.lineTo(g_dragstart.x,g_mousePos.y);
-    context.closePath();
+	vrect(context,g_dragstartpos,g_mousePos);
     context.fill();
+	context.stroke();
 }
-function dragFeedbackRect(context){
-	dragFeedbackRectSub(context,"red",0.25);
+function dragFeedbackDragRect(context){
+	dragFeedbackDragRectSub(context,"red",0.2);
+}
+function drawFeedbackDragRect(context){
+	if (g_dragstartpos){dragFeedbackDragRect(context);}
+	else{
+		dragFeedbackCrosshairFull(context);
+	}
 }
 function dragFeedbackSelectRect(context){
 	if (g_leftmousebutton){
-		dragFeedbackRectSub(context,"green",0.25);
+		dragFeedbackDragRectSub(context,"green",0.20);
 	}
 }
 function dragFeedbackMultiSelect(context){
@@ -566,11 +581,11 @@ function dragFeedbackLine(context){
 //	var vct=viewContext(context,vc.view);
 	var vct={context:context, view:vc.view};
 	console.log("dfbl");
-	if (g_dragstart){
+	if (g_dragstartpos){
 		context.globalAlpha=0.75;
 		context.strokeStyle = "red";
 		context.beginPath();
-		context.moveTo(g_dragstart.x,g_dragstart.y);
+		context.moveTo(g_dragstartpos.x,g_dragstartpos.y);
 		var endpoint=getSnappedRefPoint(viewCursor());
 		vctLineTo(vct,endpoint);
 		context.stroke();
@@ -820,6 +835,10 @@ function polyCentre(poly){
 }
 
 function drawFeedbackPickPolyPoint(ctx) {
+	if (isMultiSelect()){
+		drawFeedbackSelectTool(ctx);
+		return;
+	}
 	ctx.globalAlpha=0.5;
 	picked = g_adjustPoint?g_adjustPoint:pickPolyFeatureAt(viewCursor(),100000.0);
 	if (picked.poly) {
@@ -838,17 +857,17 @@ function drawFeedbackPickPoint(ctx) {
 //		vfillcircle(ctx,spos,g_snapRadius);
 	}
 }
-
+function isDragging(){return g_dragstartpos!=null;}
 function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
+	if (isDragging()){ drawFeedbackDragRect(ctx);return};
 	var vc=viewCursor();
 	var pt = pickPointAt(vc);
 	if (pt){
 		var spos=worldToScreen(viewCursor().view,pt);
-	    vfillcircle(ctx,spos,g_snapRadius);
-	}
-	
-	drawCrosshairFull(ctx,vc);
+		drawNewCrosshair(ctx,spos);
+	} else	
+		drawCrosshairFull(ctx,vc);
 }
 
 function drawCrosshairFull(context,vc){
@@ -1142,9 +1161,9 @@ function repaintView(context,vp) {
    vctDrawAxialCross(vct,g_viewCentre,20.0/vp.zoom);
 
   
-  // show current tool feedback
-  if (g_drawfeedback){
-    g_drawfeedback(context);
+  // show current tool feedback, unless it's pinch-zooming
+  if (g_tool && !isMultiTouch()){
+		if (g_tool.drawfeedback){g_tool.drawfeedback(context);}
 
   }
   if (g_cursorTxt){
@@ -1305,28 +1324,26 @@ function SetCursor(type){
 
 function makeRectToolVariant(polyCreateFn,txt){
   return{
+	
+	drawfeedback:drawFeedbackDragRect,
 	name:txt,
     activate: function(e){
 		SetCursor("crosshair");
-       g_drawfeedback=dragFeedbackCrosshairFull;
     },
     mousepassivemove: function(e){
     },
     mousedrag: function(e){
-      g_drawfeedback=dragFeedbackRect;
     },
     mouseclickup:function(e){
-        g_drawfeedback=dragFeedbackCrosshairFull;
 	},
     mousedragend:function(e){
-		if (g_dragstart){
-			newrect={start:g_dragstart,end:g_mousePos,name: getCurrentLabel()};
+		if (g_dragstartpos){
+			newrect={start:g_dragstartpos,end:g_mousePos,name: getCurrentLabel()};
 
-			if (distSquared2d(g_dragstart,g_mousePos)>0){
+			if (distSquared2d(g_dragstartpos,g_mousePos)>0){
 			  AddPoly(polyCreateFn(viewCursor().view,newrect));
 			}
 		}
-        g_drawfeedback=dragFeedbackCrosshairFull;
     }
   }
 }
@@ -1354,7 +1371,13 @@ function dumpHrc(pls,indent){
 }
 g_parentTool={
 	name:"set object parents (pick parts)",
-	activate: function(e){ g_drawfeedback=drawFeedbackPickPolyPoint; g_currPoly=0;},
+	drawfeedback:function(ctx){
+		drawFeedbackPickPolyPoint(ctx);
+		ctx.fillText(g_mousePos.x,g_mousePos.y+20,
+			(!g_currPoly)?"pick parent":"pick part of"+g_currPoly.name
+		);
+	},
+	activate: function(e){ g_currPoly=0;},
 	mousepassivemove:function(e){
 		g_cursorTxt = !g_currPoly?"pick parent":"pick part of "+g_currPoly.name
 	},
@@ -1382,18 +1405,18 @@ function lastIsNot(array,x){
 g_dragLineTool={
 	name:"deprecated draw edges",
 	activate: function(e){
-		g_drawfeedback=drawFeedbackDrawPoly;
 		g_drawingPoly=[];
 		SetCursor("crosshair");
 		return true;
 	},
+	drawfeedback:drawFeedbackDrawPoly,
 
   mousedown: function(e){
   },
   
   mouseclickup:function(e){
 	console.log("drawline mouse click up");
-//	g_dragstart=null;	// cancel drag.
+//	g_dragstartpos=null;	// cancel drag.
 	var ept=pickOrMakePoint(viewCursor());
 	if (g_drawingPoly.length){
 		if (vdistSquared(g_drawingPoly[g_drawingPoly.length-1],ept)<0.00001)
@@ -1405,9 +1428,9 @@ g_dragLineTool={
 		// todo - linestrip mode.. right-click??
 		g_drawingPoly=[];
 	}
-/*	  if (g_dragstart){
-	      if (distSquared2d(g_mousePos,g_dragstart)>0){
-		    vstart=pickOrMakePoint(viewCursorAt(g_dragstart));
+/*	  if (g_dragstartpos){
+	      if (distSquared2d(g_mousePos,g_dragstartpos)>0){
+		    vstart=pickOrMakePoint(viewCursorAt(g_dragstartpos));
 			vend=pickOrMakePoint(viewCursor());
 		    AddPoly({points:[vstart,vend], name:getCurrentLabel()});
 				
@@ -1423,7 +1446,7 @@ g_dragLineTool={
       
   },
   cancel:function(){
-      g_dragstart=null;//g_mousePos;
+      g_dragstartpos=null;//g_mousePos;
 		g_drawingPoly=[];
   }
 };
@@ -1431,22 +1454,22 @@ g_dragLineTool={
 
 function makeDrawToolVariant(_name,drawFn,rclickfn){
 	tool={
-	  name:_name,
-	  activate: function(e){
-			g_drawfeedback=drawFeedbackDrawPoly;
+		name:_name,
+		drawfeedback:drawFeedbackDrawPoly,
+		activate: function(e){
 			g_drawingPoly=[];
 			SetCursor("crosshair");
 			return true;
-	  },
-	  mousedown:function(e){},
-	  mouseclickup:drawFn,
-	  mousedragend:function(e){
-	  },
-	  mouserightclick:rclickfn,
-	  cancel:function(){
-      g_dragstart=null;//g_mousePos;
+		},
+		mousedown:function(e){},
+		mouseclickup:drawFn,
+		mousedragend:function(e){
+		},
+		mouserightclick:rclickfn,
+		cancel:function(){
+		g_dragstartpos=null;//g_mousePos;
 		 g_drawingPoly=[];
-	  }
+		}
 	};
 	return tool;
 }
@@ -1536,8 +1559,8 @@ function ScaleVerticesByDrag(fn){
 function makeTransformToolVariant(_name,transFn,rclickfn){
 	tool={
 		name:_name,
+		drawfeedback:drawFeedbackTransformTool,
 		activate:function(e){
-			g_drawfeedback=drawFeedbackTransformTool;
 			SetCursor("move");
 			return true;
 		},
@@ -1562,7 +1585,6 @@ g_scaleTool=makeTransformToolVariant("scale",ScaleVerticesByDrag,null);
 g_polyTool=makeDrawToolVariant(
 	"polygon",
 	function(e){
-		g_drawfeedback=drawFeedbackDrawPoly;
 		console.log("add poly point");
 		if (g_drawingPoly.length>2){
 			if (cursorScreenDistSquared(viewCursor(),g_drawingPoly[0])<sqr(g_snapRadius)){
@@ -1617,7 +1639,7 @@ g_lineTool=makeDrawToolVariant(
 
 
 g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
-  g_drawfeedback=drawFeedbackDrawQuadstrip;
+//  g_drawfeedback=drawFeedbackDrawQuadstrip;
   console.log("add quadstrip point");
   g_drawingPoly.push(pickOrMakePoint(viewCursor()));
   if (g_drawingPoly.length==4){
@@ -1637,8 +1659,8 @@ g_quadstripTool=makeDrawToolVariant("quadstrip",function(e){
 		  AddPoly(makeTri(vt0,vt2,vt3,getCurrentLabel()));
 		  g_drawingPoly=[vt3];
 	  }else
-		  AddPoly(makeQuad(vt0,vt1,vt3,vt2,getCurrentLabel()));
-	  g_drawingPoly=[vt2,vt3];
+		  AddPoly(makeQuad(vt0,vt1,vt2,vt3,getCurrentLabel()));
+	  g_drawingPoly=[vt3,vt2];
 	  return;
 	}
   },
@@ -1650,9 +1672,9 @@ g_adjustPoint=null;
 
 g_pointTool={
 	name:"draw points",
+	drawfeedback:dragFeedbackCrosshair,
 	activate:function(e){
 		g_adjustPoint=null;
-		g_drawfeedback=dragFeedbackCrosshair;
 		SetCursor("crosshair");
 	},
 	mousedown: function(e){},
@@ -1715,8 +1737,8 @@ function ClearVertexSelectionTags(){
 
 g_selectTool={
 	name:"select",
+	drawfeedback:drawFeedbackSelectTool,
 	activate:function(e){
-	    g_drawfeedback=drawFeedbackSelectTool;
 		SetCursor("default");
 	},
 	mousepassivemove: function(e){
@@ -1736,7 +1758,6 @@ g_selectTool={
 	},
 	cancel: function(){
 		g_adjustPoint=null;
-	    g_drawfeedback=drawFeedbackSelectTool;
 	}
 };
 
@@ -1865,9 +1886,9 @@ function ToggleVertexTag(){
 g_extruded=false;
 g_extrudeTool={
 	name:"extrude",
+	drawfeedback:drawFeedbackPickPoint,
 	activate:function(e){
 		console.log("extrude tool");
-		g_drawfeedback=drawFeedbackPickPoint;
 		g_mouseScreenDelta=vzero();
 		SetCursor("move");
 		g_extruded=false;
@@ -1924,8 +1945,8 @@ function multiSelectMouseDragUp(e){
 	var selectedVertices=new Map();
 	foreachVertex(function(v){selectedVertices.set(v,true);});
 	vc=viewCursor();
-	pmin=vmin(g_dragstart,g_mousePos);
-	pmax=vmax(g_dragstart,g_mousePos);
+	pmin=vmin(g_dragstartpos,g_mousePos);
+	pmax=vmax(g_dragstartpos,g_mousePos);
 	console.log("bounds:"+JSON.stringify([pmin,pmax]));
 	selectedVertices.forEach(function(val,vt,map){
 		var spos=worldToScreen(vc.view, vt);
@@ -1978,11 +1999,10 @@ function multiSelectTagPoint(e){
 
 g_adjustTool={
   name:"adjust vertices/edgesplit",
+    drawfeedback:drawFeedbackPickPolyPoint,
   activate:function(e){
-    g_drawfeedback=drawFeedbackPickPolyPoint;
   },
   mousepassivemove: function(e){
-    g_drawfeedback=drawFeedbackPickPolyPoint;
   },
   mousedrag: function(e){
 	vc=viewCursor();
@@ -2106,7 +2126,6 @@ g_adjustTool={
   cancel: function(){
 	g_hackMoveTaggedVertices=false;
     g_adjustPoint=null;
-    g_drawfeedback=drawFeedbackPickPolyPoint;
   }
 };
 
@@ -2305,7 +2324,7 @@ var g_multiTouchZoomFactor;
 editor.addEventListener('touchstart',function(e){
 	// we know it's an ipad.. need bigger tolerance
 	g_multiTouchZoomFactor=g_zoom;
-	g_snapRadius=12;
+	g_snapRadius=15;
 	g_maxTouchFingers=1;
 	readTouchPos(e);
 	g_leftmousebutton=true;	// treat it as LBM?
@@ -2337,11 +2356,11 @@ editor.addEventListener('touchmove',function(e){
 	}
 });
 
+function isMultiTouch(){ return g_maxTouchFingers>1;}
 
 function multiTouchNav(e){
 	var worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
 
-	g_drawfeedback=null;
 	vsubto(g_viewCentre,worldDelta);
 	printAt(100,100,"4"+JSON.stringify([g_mouseScreenDelta,g_secondTouchDelta]));
 	if (g_mouseScreenDelta && g_secondTouchDelta){
@@ -2372,6 +2391,10 @@ function debugDrawMultiTouch(ctx){
 			));
 		}
 
+window.addEventListener('resize',function(e){
+	Resize();
+	repaint();
+},true);
 
 editor.addEventListener('mousemove',function(e){readMousePos(e);editorMouseMoveSub(e)});
 function editorMouseMoveSub(e){
@@ -2973,7 +2996,7 @@ function editorMouseDownSub(e){
 			e.preventDefault();
 		} else {
 			// lbutton
-			g_dragstart=cloneVertex(g_mousePos);
+			g_dragstartpos=cloneVertex(g_mousePos);
 
 		// todo - inherit shift-overide in the tool func?
 			if (isMultiSelect()){
@@ -3008,7 +3031,7 @@ function editorMouseUpSub(e){
 		}
 	} else{
 		// tools can distinguish drag-release from click-release
-		if (distSquared2d(g_dragstart,g_mousePos)>0){
+		if (distSquared2d(g_dragstartpos,g_mousePos)>0){
 			if (isMultiSelect() || g_multiSelectDrag){
 				multiSelectMouseDragUp(e);
 			} else{
@@ -3026,7 +3049,9 @@ function editorMouseUpSub(e){
 		}
 	}
 	g_multiSelectDrag=false;
+	g_dragstartpos=null;
 	repaint();
+
 }
 
 window.addEventListener('keyup', function(e){
