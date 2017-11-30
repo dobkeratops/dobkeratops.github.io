@@ -223,6 +223,7 @@ function clamp(lo,hi,x){return Math.max(lo,Math.min(hi,x));}
 function vsqr(v){return vdot(v,v);}
 function vcross2d(a,b){return a.x*b.y-a.y*b.x;}
 function vlength(a){return Math.sqrt(vsqr(a));}
+function vlengthBetween(a,b){return vlength(vsub(b,a));}
 function vdist(a,b){return vlength(vsub(a,b));}
 function vdistSquared(a,b){return vsqr(vsub(a,b));}
 function vcross(a,b){
@@ -1402,6 +1403,60 @@ function lastIsNot(array,x){
 	if (array.length==0) {return true;}
 	return (array[array.length-1]!=x);
 }
+
+// lasso tool ... better for touchscreens? 
+
+var g_lassoStepDist=30;
+var g_lassoDrawMaxPoints=32;
+if (!Array.prototype.last){
+	Array.prototype.last=function(){return this.length>0?this[this.length-1]:null;};
+}
+
+g_lassoDrawTool={
+	name:"draw-lasso tool",
+	drawfeedback:drawFeedbackDrawPoly,
+	activate: function(e){g_drawingPoly=[]; SetCursor("crosshair");},
+	mousedrag:function(e){
+		var vc=viewCursor();
+		if (!g_drawingPoly.length){
+			g_drawingPoly.push(vc.worldpos);
+		} else{
+			var lastpt=g_drawingPoly[g_drawingPoly.length-1];
+			if (vdistSquared(worldToScreen(vc.view,lastpt),g_mousePos)>sqr(g_lassoStepDist)){
+				g_drawingPoly.push(vc.worldpos);
+			}
+		}
+	},
+	mousedragend:function(e){
+		// make an approx poly from it
+		if (!g_drawingPoly.length) {return;}
+		while (g_drawingPoly.length>g_lassoDrawMaxPoints){
+			var bestscore=100000000.0;
+			var besti=-1;
+			// find the straightest 2 points,
+			var i;
+			for (i=0; i<g_drawingPoly.length;i++){
+				var iprev=i?i-1:g_drawingPoly.length-1;
+				var inext=(i+1)%g_drawingPoly.length;
+				var dist01=vlengthBetween(g_drawingPoly[iprev],g_drawingPoly[i]);
+				var dist12=vlengthBetween(g_drawingPoly[inext],g_drawingPoly[i]);
+				var dist02=vlengthBetween(g_drawingPoly[inext],g_drawingPoly[iprev]);
+				// how linear is it? if dist02=dist01+dist12, it's perfect. the higher, the worse
+				var score=((dist01+dist12)-dist02)/dist02;
+				if (score<bestscore){
+					bestscore=score;
+					besti=i;
+				}
+			}
+			// remove besti
+			console.log("remove vertex "+besti+" of "+g_drawingPoly.length);
+			g_drawingPoly.splice(besti,1);
+		}
+		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+		g_drawingPoly=[];
+	}
+}
+
 g_dragLineTool={
 	name:"deprecated draw edges",
 	activate: function(e){
@@ -3204,7 +3259,7 @@ CreateUIGroup("file",
 ]);
 
 CreateUIGroup("adjust","adjust polygons by moving vertices and splitting edges", mkset(g_adjustTool),null);
-CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkset(g_pointTool)],["lines",mkset(g_lineTool)],["rect",mkset(g_rectTool)],["poly",mkset(g_polyTool)],["oct",mkset(g_octTool)],["cancel",Cancel]]);
+CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkset(g_pointTool)],["lines",mkset(g_lineTool)],["rect",mkset(g_rectTool)],["poly",mkset(g_polyTool)],["lasso",mkset(g_lassoDrawTool)],["cancel",Cancel]]);
 
 CreateUIGroup("vertex",
   "vertex selection and mesh manipulation tools",
@@ -3283,7 +3338,7 @@ window.addEventListener('keydown',  function(e){
 
   else if (kc==79){SetTool(g_pointTool)}
   else if (kc==84){SetTool(g_selectTool)}
-  else if (kc==76){SetTool(g_lineTool)}
+  else if (kc==76){if (g_alt){SetTool(g_lassoDrawTool);}else{SetTool(g_lineTool);}}
   else if (kc==221){TogglePresetLabel(1);}
   else if (kc==219){TogglePresetLabel(-1);}
   else if (kc==27){Cancel();}
