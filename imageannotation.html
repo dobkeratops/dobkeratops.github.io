@@ -3133,7 +3133,7 @@ function PasteFromClipboard(){
 		numpts++;
 	});
 	var selCentre=vscale(accumvt,1.0/numpts);
-	var screenDelta=vsub(g_mousepos,worldToScreen(vc,selCentre));
+	var screenDelta=vsub(g_mousePos,worldToScreen(vc.view,selCentre));
 	var worldDelta=screenDeltaToWorldAt(vc,screenDelta);
 	selVertexMap.forEach(function(newvt,keyvt,map){
 		vaddto(newvt,worldDelta);
