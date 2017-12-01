@@ -576,9 +576,14 @@ function dragFeedbackSelectRect(context){
 		dragFeedbackDragRectSub(context,"green",0.20);
 	}
 }
-function dragFeedbackMultiSelect(context){
+function drawFeedbackMultiSelect(context){
+	console.log("drawFeedbackMultiSelect");
 	drawCrosshairFull(context,viewCursor());
-	drawFeedbackPickPoint(context);
+	if (g_multiSelectDrag){
+		dragFeedbackDragRectSub(context,"green",0.20);
+	}else {
+		drawFeedbackPickPoint(context);
+	}
 }
 
 function getSnappedRefPoint(viewcursor){
@@ -974,6 +979,7 @@ function drawFeedbackPickPoint(ctx) {
 }
 function isDragging(){return g_dragstartpos!=null;}
 function drawFeedbackSelectTool(ctx){
+	console.log("select tool df:"+g_dragstartpos);
 //	drawFeedbackPickPolyPoint(ctx);
 	if (isDragging()){ drawFeedbackDragRect(ctx);return};
 	var vc=viewCursor();
@@ -1314,8 +1320,12 @@ function repaintView(context,vp) {
 
   
   // show current tool feedback, unless it's pinch-zooming
-  if (g_tool && !isMultiTouch()){
-		if (g_tool.drawfeedback){g_tool.drawfeedback(context);}
+  if (!isMultiTouch()){
+		if (isMultiSelect()){	//this override is applied everywhere manually, no more 'g_drawfeedback
+			drawFeedbackMultiSelect(context);
+		}
+		else
+		if (g_tool && g_tool.drawfeedback){g_tool.drawfeedback(context);}
 
   }
   if (g_cursorTxt){
@@ -2178,11 +2188,9 @@ g_extrudeTool={
 g_multiSelectDrag=false;
 function multiSelectMouseMove(e) {
 //	console.log("multi select mouse move,tool=",g_tool.name);
-	g_drawfeedback=dragFeedbackSelectRect;
 }
 function multiSelectPassiveMouseMove(e) {
 //	console.log("multi select mouse move,tool=",g_tool.name);
-	g_drawfeedback=dragFeedbackMultiSelect;
 }
 function inrange(a,lo,hi){return a>=lo && a<=hi;}
 
@@ -2731,13 +2739,9 @@ window.addEventListener('resize',function(e){
 
 editor.addEventListener('mousemove',function(e){readMousePos(e);editorMouseMoveSub(e)});
 function editorMouseMoveSub(e){
-	
-
-	if (g_multiSelectDrag){
-		console.log("g_multiSelectDrag");
+	console.log("editormousemove "+g_ctrl+" "+g_multiSelectDrag);
+	if (isMultiSelect()){
 		multiSelectMouseMove(e);
-	}else if (isMultiSelect()){
-		g_drawfeedback=dragFeedbackMultiSelect;
 	}else {
 		if (g_leftmousebutton){
 			if (g_tool.mousedrag) {
@@ -3138,6 +3142,7 @@ function PasteFromClipboard(){
 	selVertexMap.forEach(function(newvt,keyvt,map){
 		vaddto(newvt,worldDelta);
 	});
+
 	selPolyMap.forEach(function(val,keypl,map){
 		newpl={points:[],name:keypl.name, color:keypl.color};
 		for (var i=0; i<keypl.points.length; i++){
@@ -3318,11 +3323,12 @@ function ViewToggle(){
 	}
 }
 function isMultiSelect(){
-	return (g_ctrl && g_ctrlIsMultiSelect);
+	return ((g_ctrl && g_ctrlIsMultiSelect)||g_multiSelectDrag);
 }
 editor.addEventListener('mousedown',function(e){readMousePos(e);editorMouseDownSub(e)});
 
 function editorMouseDownSub(e){
+			console.log("editorMouseDown,button="+e.button);
 	
 		g_leftmousebutton=true;
 		if (e.button==2){
@@ -3331,8 +3337,10 @@ function editorMouseDownSub(e){
 			// lbutton
 			g_dragstartpos=cloneVertex(g_mousePos);
 
+			console.log("g_ctrl="+g_ctrl);
 		// todo - inherit shift-overide in the tool func?
 			if (isMultiSelect()){
+				console.log("isMultiSelect");
 				multiSelectMouseDown(e);
 			} else {
 				console.log("g_tool mousedown:"+g_tool.name+(g_tool.mousedown?" yes":"null"));
