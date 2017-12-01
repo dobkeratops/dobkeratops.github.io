@@ -763,6 +763,14 @@ function drawNewCrosshair(context,crossHairPos){
 	drawCrosshair(context,crossHairPos,g_snapRadius*2);
 	vdrawcircle(context,crossHairPos,g_snapRadius);
 }
+
+function drawFeedbackDrawPolyVertices(vct){
+	  vct.context.fillStyle=g_drawFeedbackColor;
+	  for (var i=0; i<g_drawingPoly.length; i++){
+		vctFillCircle(vct,g_drawingPoly[i],g_snapRadius/2);
+	  }
+}
+
 function drawFeedbackDrawPoly(context){
 	const drawPolyColor=g_drawFeedbackColor;
 	var vc=viewCursor();
@@ -791,10 +799,7 @@ function drawFeedbackDrawPoly(context){
       vctLineTo(vct,endpt);
       context.stroke();
 
-	  context.fillStyle=drawPolyColor;
-	  for (var i=0; i<g_drawingPoly.length; i++){
-		vctFillCircle(vct,g_drawingPoly[i],g_snapRadius/2);
-	  }
+		drawFeedbackDrawPolyVertices(vct);
 
 	  
       context.globalAlpha=0.15;
@@ -876,7 +881,20 @@ function drawFeedbackMultiTool(ctx){
 	// needs greater feedack of 'last point'
 		var spos1=worldToScreen(vc.view, g_multiToolLastPoint);
 		vfillcircle(ctx, spos1, g_snapRadius);
-	}	
+	}
+   if (g_drawingPoly.length){	
+		ctx.strokeStyle=g_drawFeedbackColor;
+	  drawFeedbackDrawPolyVertices(vct);
+      ctx.globalAlpha=0.15;
+      ctx.beginPath();
+	  // give some indication that we could fill a poly
+      vctMoveTo(vct,currPoint);
+      vctLineTo(vct,vlerp(currPoint,g_drawingPoly[0],0.125));
+      vctMoveTo(vct,g_drawingPoly[0]);
+      vctLineTo(vct,vlerp(g_drawingPoly[0],currPoint,0.125));
+      ctx.stroke();
+   }
+
 }
 
 function drawFeedbackPickPoint(ctx) {
@@ -2134,7 +2152,7 @@ function multiSelectTagPoint(e){
 var g_multiToolLastPoint=null;
 g_multiTool={
 	name:"drag-adjust vertices, drag-edgesplit, and draw edges from tag",
-  activate:function(e){g_multiToolLastPoint=null;},
+  activate:function(e){g_multiToolLastPoint=null; g_drawingPoly=[];},
   drawfeedback:drawFeedbackMultiTool, 
   mousedown: function(e){
 	console.log("multitool click");
@@ -2151,8 +2169,15 @@ g_multiTool={
 	var clickPt=pickOrMakePointEdgeSplit(viewCursor());
 	console.log("multitool click down: clicked pt tag="+ (clickPt?(clickPt.tag?1:0):"no click pt"));
 	clickPt.tag^=true;
+	// maybe continue poly draw..
+	if (clickPt.tag){g_drawingPoly.push(clickPt);} else {g_drawingPoly=[];}
     if (g_multiToolLastPoint && clickPt) {
+		// todo: not if edge exists.
 		AddEdgeMaybeSplitPoly(g_multiToolLastPoint, clickPt);
+		// todo - this tool should optionally fill a polygon if you click one out
+		if (g_drawingPoly[0] && clickPt==g_drawingPoly[0]){
+			console.log("fill poly?");
+		}
     }
 	if (g_multiToolLastPoint){
 		g_multiToolLastPoint.tag=false;
@@ -2162,6 +2187,7 @@ g_multiTool={
 	} else {
 		g_multiToolLastPoint=null;
 	}
+	console.log("draw polyline- vertices="+g_drawingPoly.length);
 
 
   },
@@ -2171,6 +2197,7 @@ g_multiTool={
 		vaddto(g_multiToolLastPoint,
 			screenDeltaToWorldAt(vc,g_mouseScreenDelta));
 	}
+	g_drawingPoly=[]; // cancels poly draw.
   },
   mousedragend: function(e){
 	console.log("multitool drag end");
@@ -2185,6 +2212,7 @@ g_multiTool={
 	},
   cancel: function(){
     g_multiToolLastPoint=null;
+	g_drawingPoly=[];
   },
   // click - like 'adjust tool', 
   // except it might draw edges if points are tagged.
@@ -2519,7 +2547,7 @@ var g_multiTouchZoomFactor;
 editor.addEventListener('touchstart',function(e){
 	// we know it's an ipad.. need bigger tolerance
 	g_multiTouchZoomFactor=g_zoom;
-	g_snapRadius=15;
+	g_snapRadius=20;
 	g_maxTouchFingers=1;
 	readTouchPos(e);
 	g_leftmousebutton=true;	// treat it as LBM?
