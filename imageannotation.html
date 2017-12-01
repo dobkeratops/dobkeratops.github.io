@@ -870,8 +870,11 @@ function drawFeedbackMultiTool(ctx){
 		vctMoveTo(vct,g_multiToolLastPoint);
 		vctLineTo(vct,currPoint);
 		ctx.stroke();
-	}
+	// needs greater feedack of 'last point'
+		vfillcircle(ctx, spos, g_snapRadius);
+	}	
 }
+
 function drawFeedbackPickPoint(ctx) {
 	ctx.globalAlpha=0.5;
 	var pt=pickPointAt(viewCursor());
