@@ -863,15 +863,19 @@ function drawFeedbackMultiTool(ctx){
 	var vct={context:ctx,view:vc.view};
 	var currPoint=pick.pickedPoint?pick.pickedPoint:vc.worldpos;
 	var spos=worldToScreen(vc.view, currPoint);
-	drawNewCrosshair(ctx,spos);
+	if (pick){
+		drawNewCrosshair(ctx,spos);
+	}
 	
 	if (g_multiToolLastPoint && g_multiToolLastPoint.tag) {
 		ctx.strokeStyle=g_drawFeedbackColor;
+		ctx.fillStyle=g_drawFeedbackColor;
 		vctMoveTo(vct,g_multiToolLastPoint);
 		vctLineTo(vct,currPoint);
 		ctx.stroke();
 	// needs greater feedack of 'last point'
-		vfillcircle(ctx, spos, g_snapRadius);
+		var spos1=worldToScreen(vc.view, g_multiToolLastPoint);
+		vfillcircle(ctx, spos1, g_snapRadius);
 	}	
 }
 
