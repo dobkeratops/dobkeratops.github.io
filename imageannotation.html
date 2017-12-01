@@ -3,6 +3,7 @@
 <body>
 <style>body{overflow:hidden; width:100%;height:100%;}
 </style>
+<div id="genImages"></div>
 <div>
 <button class="button" value="" id="b0">b0</button>
 <button class="button" value=""id="b1">b1</button>
@@ -17,6 +18,7 @@
 <button class="button" value=""id="b10">b10</button>
 <button class="button" value=""id="b11">b11</button>
 <button class="button" value=""id="b12">b12</button>
+<button class="button" value=""id="b13">b12</button>
 <input class="button" id="currentLabel" value="object"title="current label used for new elements">label</button>
 
 <canvas id="editor" width="100pc" height="100pc">
@@ -89,6 +91,7 @@ function NewImage(){
   repaint();
 }
 var g_shift,g_ctrl,g_alt,g_leftmousebutton,g_rightmousebutton,g_midmousebutton;
+var g_drawFeedbackColor="red"
 editor=document.getElementById("editor");
 var g_presetLabels=["object","person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
 
@@ -383,7 +386,8 @@ function polyFromRect(view,rc) {
       vfromxyz(rc.end.x,   rc.end.y ,z),
       vfromxyz(rc.start.x, rc.end.y ,z)
     ]),
-    name:rc.name
+    name:rc.name,
+	drawnby:"linetool"
   };
 }
 
@@ -405,7 +409,8 @@ function polyOctFromRect(view,rc) {
       vfromxyz(x0,  lerp(y1,y0,t),z),
       vfromxyz(x0,  lerp(y0,y1,t),z),
     ]),
-    name:rc.name
+    name:rc.name,
+	drawnby:"octtool"
   };
 }
 
@@ -437,17 +442,19 @@ function trimPolyPoints(poly) {
 function polyFromLine(v0,v1,name){
   return{
     points:[v0,v1],
-    name:name
+    name:name,
+	drawby:"linetool"
   }
 }
 function polyFromPoint(v0,name){
   return{
     points:[v0],
-    name:name
+    name:name,
+	drawnby:"pointtool"
   }
 }
 function makeQuad(v0,v1,v2,v3,nm){
-	var newpoly= {points:[v0,v1,v2,v3],name:nm};
+	var newpoly= {points:[v0,v1,v2,v3],name:nm, drawnby:"polytool"};
 	return newpoly;
 }
 function makeTri(v0,v1,v2,nm){
@@ -757,7 +764,7 @@ function drawNewCrosshair(context,crossHairPos){
 	vdrawcircle(context,crossHairPos,g_snapRadius);
 }
 function drawFeedbackDrawPoly(context){
-	const drawPolyColor="red";
+	const drawPolyColor=g_drawFeedbackColor;
 	var vc=viewCursor();
 	var pick=pickPolyFeatureAt(vc,g_snapRadius*2);
 //	consolejson(pick);
@@ -847,6 +854,22 @@ function drawFeedbackPickPolyPoint(ctx) {
 		drawNewCrosshair(ctx,spos);
 
 //		vfillcircle(ctx,spos,g_snapRadius);
+	}
+}
+function drawFeedbackMultiTool(ctx){
+	ctx.globalAlpha=0.5;
+	var vc=viewCursor();
+	var pick=pickPolyFeatureAt(vc, g_snapRadius);
+	var vct={context:ctx,view:vc.view};
+	var currPoint=pick.pickedPoint?pick.pickedPoint:vc.worldpos;
+	var spos=worldToScreen(vc.view, currPoint);
+	drawNewCrosshair(ctx,spos);
+	
+	if (g_multiToolLastPoint && g_multiToolLastPoint.tag) {
+		ctx.strokeStyle=g_drawFeedbackColor;
+		vctMoveTo(vct,g_multiToolLastPoint);
+		vctLineTo(vct,currPoint);
+		ctx.stroke();
 	}
 }
 function drawFeedbackPickPoint(ctx) {
@@ -1094,6 +1117,43 @@ function DoesEdgeSplitPoly(vs,ve){
 	
 }
 
+var g_rawImage = new Uint8ClampedArray(256 * 256 * 4);
+for (var j=0; j<256; j++) {
+	for (var i=0; i<256;i++){
+		g_rawImage[(i+j*256)*4+0]=i;
+		g_rawImage[(i+j*256)*4+1]=j;
+		g_rawImage[(i+j*256)*4+2]=i-j;
+		g_rawImage[(i+j*256)*4+3]=((i&15)+(j&15))*16;
+	}
+}
+function imageFromArray(buffer,width,height){
+	var tmpCanvas=document.createElement("canvas");
+	var ctx=tmpCanvas.getContext("2d");
+	tmpCanvas.width=width;
+	tmpCanvas.height=height;
+	var idata=ctx.createImageData(width,height);
+//there must be a better way?!
+//	idata.data.splice(0,0,buffer.slice(0,width*height*4));
+	for (var i=0; i<width*height*4;i++){ idata.data[i]=buffer[i];}
+	ctx.putImageData(idata,0,0);
+	
+	var img= new Image();
+	img.src=tmpCanvas.toDataURL();
+	img.onload=function(){console.log("tmp image loaded."+img.width+" "+img.height)};
+	// debug- show it
+	console.log("created image."+img.width+" "+img.height);
+	return img;
+}
+var g_myimg= imageFromArray(g_rawImage,256,256);
+
+function ShowMaskedImages(){
+	// generate mask for each polygon, create an image buffer, 
+	// assemble into a page, and show it.
+	var url=window.URL.createObjectURL(new Blob(["hello world"]));
+	window.open(url,"w2");
+	//document.getElementById("genImages").appendChild(g_myimg);
+}
+
 function repaint(){
   var canvas = document.querySelector("canvas");
   var context = canvas.getContext("2d");
@@ -1284,7 +1344,6 @@ function drawPolygons(context,vp,polys,parent,sel){
 		drawPolygons(context,vp,pl.polygons,pl,sel||(pl==g_currPoly));
 	}
   }
-
 }
 
 
@@ -1422,7 +1481,10 @@ g_lassoDrawTool={
 			g_drawingPoly.push(vc.worldpos);
 		} else{
 			var lastpt=g_drawingPoly[g_drawingPoly.length-1];
-			if (vdistSquared(worldToScreen(vc.view,lastpt),g_mousePos)>sqr(g_lassoStepDist)){
+			var drawdir=vsub(vc.worldpos,lastpt);
+			var mouseWorldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
+
+			if (vdistSquared(worldToScreen(vc.view,lastpt),g_mousePos)>sqr(g_lassoStepDist) || vdot(drawdir, mouseWorldDelta)<0){
 				g_drawingPoly.push(vc.worldpos);
 			}
 		}
@@ -1452,7 +1514,11 @@ g_lassoDrawTool={
 			console.log("remove vertex "+besti+" of "+g_drawingPoly.length);
 			g_drawingPoly.splice(besti,1);
 		}
-		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+		AddPoly({points:g_drawingPoly,name:getCurrentLabel(),drawnby:"lasso"});
+		g_drawingPoly=[];
+	},
+	cancel:function(e){
+      g_dragstartpos=null;//g_mousePos;
 		g_drawingPoly=[];
 	}
 }
@@ -1487,7 +1553,7 @@ g_dragLineTool={
 	      if (distSquared2d(g_mousePos,g_dragstartpos)>0){
 		    vstart=pickOrMakePoint(viewCursorAt(g_dragstartpos));
 			vend=pickOrMakePoint(viewCursor());
-		    AddPoly({points:[vstart,vend], name:getCurrentLabel()});
+		    AddPoly({points:[vstart,vend], name:getCurrentLabel(),drawnby:"linedraw"});
 				
 			
 		  }
@@ -1508,7 +1574,7 @@ g_dragLineTool={
 
 
 function makeDrawToolVariant(_name,drawFn,rclickfn){
-	tool={
+	var tool={
 		name:_name,
 		drawfeedback:drawFeedbackDrawPoly,
 		activate: function(e){
@@ -1644,7 +1710,7 @@ g_polyTool=makeDrawToolVariant(
 		if (g_drawingPoly.length>2){
 			if (cursorScreenDistSquared(viewCursor(),g_drawingPoly[0])<sqr(g_snapRadius)){
 				console.log("finish poly by click");
-				AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+				AddPoly({points:g_drawingPoly,name:getCurrentLabel(),drawnby:"polytool"});
 				g_drawingPoly=[];
 				return;
 			}
@@ -1655,7 +1721,7 @@ g_polyTool=makeDrawToolVariant(
 	function(e){
 		console.log("finish poly by rclick");
 		g_drawingPoly.push(pickOrMakePoint(viewCursor()));
-		AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
+		AddPoly({points:g_drawingPoly,name:getCurrentLabel(),drawnby:"polytool"});
 		g_drawingPoly=[];
 	}
 );
@@ -1668,7 +1734,7 @@ function AddEdgeMaybeSplitPoly(vstart,vend){
 		SplitPolyByEdge(pl,vstart,vend);
 	} else {
 		console.log("adding new edge as object\n");
-		AddPoly({points:[vstart,vend], name:getCurrentLabel()});
+		AddPoly({points:[vstart,vend], name:getCurrentLabel(),drawnby:"edgesplit"});
 	}
 }
 
@@ -1678,8 +1744,8 @@ g_lineTool=makeDrawToolVariant(
 		console.log("add draw point");
 		g_drawingPoly.push(pickOrMakePointEdgeSplit(viewCursor()));
 		if (g_drawingPoly.length==2){
+
 			AddEdgeMaybeSplitPoly(g_drawingPoly[0],g_drawingPoly[1]);
-//			AddPoly({points:g_drawingPoly,name:getCurrentLabel()});
 			g_drawingPoly=[];
 		}
 	},
@@ -1753,7 +1819,8 @@ function splitEdgeOfPoly(poly, v0,v1, vmid) {
 	if (poly.points.length==2){
 	    if ((poly.points[0]==v0 && poly.points[1]==v1) || (poly.points[1]==v0 && poly.points[0]==v1) ) {
 			console.log("splitEdgeOfPoly-do edge split of"+poly.name);
-			var splitpoly=g_adjustPoint.poly;
+			
+			//var splitpoly=g_adjustPoint.poly;
 			poly.points[0]=v0;
 			poly.points[1]=vmid;
 			AddPoly( polyFromLine(vmid,v1, poly.name));
@@ -2052,15 +2119,77 @@ function multiSelectTagPoint(e){
 	}
 }
 
-g_adjustTool={
-  name:"adjust vertices/edgesplit",
-    drawfeedback:drawFeedbackPickPolyPoint,
-  activate:function(e){
-  },
-  mousepassivemove: function(e){
+// multi-tool not exactly the same as adjust-split,
+// in that the 'open clicks' behave differently.
+// edge-split happens on click
+// open clicks make new vertices for line drawing.
+// it's really more like the line-draw tool with added vertex-dragging
+var g_multiToolLastPoint=null;
+g_multiTool={
+	name:"drag-adjust vertices, drag-edgesplit, and draw edges from tag",
+  activate:function(e){g_multiToolLastPoint=null;},
+  drawfeedback:drawFeedbackMultiTool, 
+  mousedown: function(e){
+	console.log("multitool click");
+/*	if (!g_multiToolLastPoint){
+		g_multiToolLastPoint=pickPointAt(vc);
+		if (g_multiToolLastPoint){
+			g_multiToolLastPoint.tag=true;
+		}
+	}
+*/
+//	if (!isMultiSelect()){
+//		ClearVertexSelectionTags();
+//	}
+	var clickPt=pickOrMakePointEdgeSplit(viewCursor());
+	console.log("multitool click down: clicked pt tag="+ (clickPt?(clickPt.tag?1:0):"no click pt"));
+	clickPt.tag^=true;
+    if (g_multiToolLastPoint && clickPt) {
+		AddEdgeMaybeSplitPoly(g_multiToolLastPoint, clickPt);
+    }
+	if (g_multiToolLastPoint){
+		g_multiToolLastPoint.tag=false;
+	}
+	if (clickPt.tag){
+		g_multiToolLastPoint=clickPt;
+	} else {
+		g_multiToolLastPoint=null;
+	}
+
+
   },
   mousedrag: function(e){
-	vc=viewCursor();
+	var vc=viewCursor();
+	if (g_multiToolLastPoint){
+		vaddto(g_multiToolLastPoint,
+			screenDeltaToWorldAt(vc,g_mouseScreenDelta));
+	}
+  },
+  mousedragend: function(e){
+	console.log("multitool drag end");
+	if (g_multiToolLastPoint){
+		g_multiToolLastPoint.tag=false;
+		g_multiToolLastPoint=null;//we dont draw from point adjustments
+	}
+  },
+  // cancel,bound to escape key
+	mouserightclick:function(e){
+	    g_multiToolLastPoint=null;
+	},
+  cancel: function(){
+    g_multiToolLastPoint=null;
+  },
+  // click - like 'adjust tool', 
+  // except it might draw edges if points are tagged.
+  mouseclickup: function(e){
+	console.log("multiTool- click up");
+  },
+
+}
+
+
+function adjustToolMouseDrag(e){
+	var vc=viewCursor();
     if (g_adjustPoint){
 		SetCursor("move");
 
@@ -2112,9 +2241,17 @@ g_adjustTool={
       }
     } else{
 			SetCursor("default");
-
 	}
+};
+
+g_adjustTool={
+  name:"adjust vertices/edgesplit",
+    drawfeedback:drawFeedbackPickPolyPoint,
+  activate:function(e){
   },
+  mousepassivemove: function(e){
+  },
+  mousedrag: adjustToolMouseDrag,
   mousedown: function(e){
     var pick=pickPolyFeatureAt(viewCursor(),100000.0);
     if (pick.poly){
@@ -2169,10 +2306,6 @@ g_adjustTool={
   },
 
   mousedragend: function(e){
-//	if (!isMultiSelect()) {
-//		ClearVertexSelectionTags();
-//	}
-
 	g_hackMoveTaggedVertices=false;
 	console.log("adjust- drag up");
     g_adjustPoint=null;
@@ -2701,7 +2834,7 @@ function foreachPolygonEdgeSub(pls,f){
 		if (pl.polygons){foreachPolygonEdgeSub(pl.polygons,f);}
 	}
 }
-function foreachPolygonEdge(pls,f){
+function foreachPolygonEdge(f){
 	foreachPolygonEdgeSub(g_polys,f);
 }
 
@@ -3057,6 +3190,7 @@ function editorMouseDownSub(e){
 			if (isMultiSelect()){
 				multiSelectMouseDown(e);
 			} else {
+				console.log("g_tool mousedown:"+g_tool.name+(g_tool.mousedown?" yes":"null"));
 				if (g_tool.mousedown){
 					g_tool.mousedown(e);
 				}
@@ -3175,13 +3309,43 @@ var g_firstButton=null;
 function getTopButton(i){
   return document.getElementById("b"+i);
 }
-function CreateUIGroup(mainName,tooltip,mainfunc,subls) {
+g_uiGroup_CurrentSubTool = new Map();
+function CreateUIGroup(dat,mainName,tooltip,mainfunc,subls) {
+  console.log("mk ui grp "+dat.name);
   var btn=document.getElementById("b"+g_nextUiGroup);
   btn.innerHTML=mainName;
   btn.title=tooltip;
   g_nextUiGroup+=1;
 
-  var f=function() {
+ // var f=function() {
+//  }
+
+  if (subls){
+   for (var i=0; i<subls.length;i++){ 
+    sub=subls[i];
+    console.log("make sub button for "+sub.name);
+	sub.composed_func= function(){
+		console.log("sub"+i+" of "+mainName+","+dat.name);
+		if (dat.sub){
+			console.log("sub "+dat.sub[i].name);
+			dat.sub[i].onpress();repaint();};
+		}
+   }
+  }
+
+  btn.onclick= function(){setSubButtons(dat,btn);}
+  
+  if (!g_firstButton && subls){g_firstButton=btn;}
+}
+
+function setSubButtons(dat,btn){//mainName,mainfunc,btn,subls){
+	var mainName=dat.name;
+	var mainfunc=dat.onpress;
+	var subls=dat.sub;
+    for (var i=0; i<g_nextUiGroup; i++) {
+       getTopButton(i).style.background="#e0e0e0";
+    }
+    btn.style.background="#ffffff";
     console.log("ui:"+mainName);
     if (mainfunc){
       mainfunc();
@@ -3192,13 +3356,12 @@ function CreateUIGroup(mainName,tooltip,mainfunc,subls) {
        var sub=subls[i];
        var sbtn=getTopButton(i+g_nextUiGroup);
        sbtn.className="subbutton";
-       sbtn.innerHTML=sub[0];
-       var subf=sub[1];
-       var textf=sub[0];
-       sbtn.onclick=compose(subf,repaint);
-//function(){console.log(textf);subf(); repaint();};
+       sbtn.innerHTML=sub.name;
+		sbtn.class="button"
+		subf=sub.onpress;
+		sbtn.onclick=compose(subf,repaint); // sub.composed_func
     }
-    for (i=subls.length;i<13-g_nextUiGroup; i++){
+    for (i=subls.length;i<14-g_nextUiGroup; i++){
        var sbtn=document.getElementById("b"+(g_nextUiGroup+i));
        sbtn.onclick=null;
        sbtn.innerHTML="";
@@ -3207,18 +3370,10 @@ function CreateUIGroup(mainName,tooltip,mainfunc,subls) {
       // this is a plain tool, no subtools, so keep existing subtools visible.
     }
     repaint();
-  }
-  btn.onclick= function(){
-    for (var i=0; i<g_nextUiGroup; i++) {
-       getTopButton(i).style.background="#e0e0e0";
-    }
-    btn.style.background="#ffffff";
-    f()};
-  if (!g_firstButton && subls){g_firstButton=f;}
-
 }
+
 function uidone(){
-  g_firstButton();
+  g_firstButton.onclick();
 }
 
 function DeselectAll(){
@@ -3236,7 +3391,7 @@ function InvertSelection(){
 	});
 }
 
-function SelectConnectedVertices(){
+function SelectVerticesConnectedByPolygons(){
   var plmap=new Map();
   foreachVertexOfPolygon(function(vt,pl){
     if (vt.tag) { plmap.set(pl,true);}
@@ -3246,50 +3401,149 @@ function SelectConnectedVertices(){
   });
 }
 
+function GetVertexVertexMap(){
+	var vmaps=new Map();	// map of every vertex-vertex 
+	var insertVertexVertexMapSub=function(vs,ve){
+		if (!vmaps.has(vs)){ vmaps.set(vs,new Map());}
+		if (!vmaps.has(ve)){ vmaps.set(ve,new Map());}
+		vmaps.get(vs).set(ve,true);
+		vmaps.get(ve).set(vs,true);
+	}
+
+	foreachPolygonEdge(function(pl,vs,ve){
+		insertVertexVertexMapSub(vs,ve);
+		insertVertexVertexMapSub(ve,vs);
+	});
+	return vmaps;
+}
+
+function SelectVerticesConnectedByEdges(){
+	var vmap=GetVertexVertexMap();
+	var vtc=GetSelectedVertices();
+	vtc.forEach(function(val,vs,map){
+		vmap.get(vs).forEach(function(val,ve,map){
+			ve.tag=true;
+		});
+	});
+}
+function ShrinkSelection(){
+	var vmaps=GetVertexVertexMap();
+	var unset=new Map();
+	// get set of vertices not selected
+	vmaps.forEach(function(vmap,vs,m){
+		vmap.forEach(function(val,ve,map){
+			if (vs.tag && ve.tag){return;}
+			if (vs.tag) {unset.set(vs,true);}	
+			if (ve.tag) {unset.set(ve,true);}	
+		})
+	});
+	unset.forEach(function(v,vt,m){ vt.tag=false;})
+}
+
+function DeselectInteriorVertices(){
+	var vmaps=GetVertexVertexMap();
+	var set=new Map();
+	// get set of vertices not selected
+	vmaps.forEach(function(vmap,vs,m){
+		vmap.forEach(function(val,ve,map){
+			if (vs.tag && ve.tag){return;}
+			if (vs.tag) {set.set(vs,true);}	
+			if (ve.tag) {set.set(ve,true);}	
+		})
+	});
+	DeselectAll();
+	set.forEach(function(v,vt,m){ vt.tag=true;})
+}
+
 function mkset(tool){return function(){SetTool(tool);}};
+function findButtonInfo(name){
+	for (var i=0; i<g_uigroups.length;i++){
+        if (!g_uigroups[i].sub) continue;
+		for(var j=0;j<g_uigroups[i].sub.length;j++){
+           if (g_uigroups[i].sub[j].name==name){
+				return g_uigroups[i].sub[j];
+           }
+        }
+    }
+   return null;
+}
+g_uigroups=[
+	{name:"file",
+		info:"file management,misc",
+		onpress:null,
+		sub:[
+			{name:"new image",onpress:NewImage},
+			{name:"load",onpress:Load},
+			{name:"save",onpress:Save},
+			{name:"help",onpress:Help}
+		]
+	},
+	{name:"adjust",info:"adjust polygons by moving vertices and splitting edges", onpress:mkset(g_adjustTool),sub:null},
+	{name:"draw",info:"primitive drawing tools",onpress:mkset(g_polyTool),
+		sub:[
+			{name:"points",onpress:mkset(g_pointTool)},
+			{name:"poly-line",onpress:mkset(g_multiTool)}, // default..
+			{name:"rect",onpress:mkset(g_rectTool)},
+			{name:"poly",onpress:mkset(g_polyTool)},
+			{name:"lasso",onpress:mkset(g_lassoDrawTool)},
+			{name:"cancel",onpress:Cancel}
+		]
+	},
+	{	name:"vertex",
+		info:"vertex selection and mesh manipulation tools",
+		onpress:mkset(g_selectTool),
+		sub:[
+		  {name:"subdiv",onpress:SubdivideByVertices},
+		  {name:"extrude",onpress:mkset(g_extrudeTool)},
+		  {name:"seperate",onpress:SeperateVertices},
+		  {name:"merge",onpress:MergeVertices},
+		  {name:"deselect",onpress:DeselectAll},
+		  {name:"delete",onpress:DeleteVertices}
+		]
+	},
+	{
+		name:"select",	// popup menu
+		onpress:mkset(g_selectTool),
+		sub:[
+		  {name:"deselect",onpress:DeselectAll},
+		  {name:"all",onpress:SelectAll},
+		  {name:"invert",onpress:InvertSelection},
+				{name:"connected by polys", onpress:SelectVerticesConnectedByPolygons},
+				{name:"connected by edges", onpress:SelectVerticesConnectedByEdges},
+				{name:"exterior", onpress:DeselectInteriorVertices},
+				{name:"shrink", onpress:ShrinkSelection},
+		]
+	},
+	{	name:"objects",
+		info:"object list manipulation",
+		onpress:null,
+		sub:[ {name:"parent",onpress:mkset(g_parentTool)},
+		    {name:"rename",onpress:RenamePoly},
+		    {name:"next",onpress:function(){ToggleCurrentPoly(1)}},
+		    {name:"prev",onpress:function(){ToggleCurrentPoly(-1)}},
+		   {name:"info",onpress:Info},
+		   {name:"delete",onpress:DeleteCurrentPoly}
+		]
+	},
+	{	name:"view",
+		info:"view options",
+		onpress:null,
+		sub:[
+			{name:"show polys",onpress:function(){g_showAllPolys^=true}},
+			{name:"show labels",onpress:function(){g_showLabelNames^=true}},
+			{name:"frame all",onpress:FrameAll},
+			{name:"single view",onpress:function(){g_viewMode=0}},
+			{name:"3d view",onpress:function(){g_viewMode=2}}
+		]
+	}
+];
+console.log("g_uigroups="+g_uigroups.length);
+for (var uigi=0; uigi<g_uigroups.length; uigi++){
+//mainName,tooltip,mainfunc,sxubls
+	var uig=g_uigroups[uigi];
+	CreateUIGroup(uig,uig.name,uig.info,uig.onpress,uig.sub);
+}
 
-CreateUIGroup("file",
-  "file management,misc",
-  null,
-  [
-  ["new image",NewImage],
-  ["load",Load],
-  ["save",Save],
-  ["help",Help],
-]);
-
-CreateUIGroup("adjust","adjust polygons by moving vertices and splitting edges", mkset(g_adjustTool),null);
-CreateUIGroup("draw","primitive drawing tools",mkset(g_polyTool),[["points",mkset(g_pointTool)],["lines",mkset(g_lineTool)],["rect",mkset(g_rectTool)],["poly",mkset(g_polyTool)],["lasso",mkset(g_lassoDrawTool)],["cancel",Cancel]]);
-
-CreateUIGroup("vertex",
-  "vertex selection and mesh manipulation tools",
-  mkset(g_selectTool),[
-  ["subdiv",SubdivideByVertices],
-  ["extrude",mkset(g_extrudeTool)],
-  ["seperate",SeperateVertices],
-  ["merge",MergeVertices],
-  ["connected",SelectConnectedVertices],
-  ["deselect",DeselectAll],
-  ["delete",DeleteVertices],
-]);
-CreateUIGroup("objects","object list manipulation",
-  null,
-  [ ["parent",mkset(g_parentTool)],
-    ["rename",RenamePoly],
-    ["next",function(){ToggleCurrentPoly(1)}],
-    ["prev",function(){ToggleCurrentPoly(-1)}],
-   ["info",Info],
-   ["delete",DeleteCurrentPoly],
-  ]
-);
-
-CreateUIGroup("view","view options",null,[
-  ["show polys",function(){g_showAllPolys^=true}],
-  ["show labels",function(){g_showLabelNames^=true}],
-  ["frame all",FrameAll],
-  ["single view",function(){g_viewMode=0}],
-  ["3d view",function(){g_viewMode=2}]
-]);
 uidone();
 
 window.addEventListener('keydown',  function(e){
@@ -3318,7 +3572,10 @@ window.addEventListener('keydown',  function(e){
 	SubdivideByVertices();
   }
   //d
-  else if (kc==68){}
+  else if (kc==68){
+	SetTool(g_multiTool);
+//	ShowMaskedImages();
+	}
   //h
   else if (kc==72){}
   //y
