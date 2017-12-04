@@ -18,8 +18,10 @@
 <button class="button" value=""id="b10">b10</button>
 <button class="button" value=""id="b11">b11</button>
 <button class="button" value=""id="b12">b12</button>
-<button class="button" value=""id="b13">b12</button>
-<button class="button" value=""id="b14">b12</button>
+<button class="button" value=""id="b13">b13</button>
+<button class="button" value=""id="b14">b14</button>
+<button class="button" value=""id="b15">b15</button>
+<button class="button" value=""id="b16">b16</button>
 <input class="button" id="currentLabel" value="object"title="current label used for new elements">label</button>
 
 <canvas id="editor" width="100pc" height="100pc">
@@ -56,6 +58,184 @@ function Help(){alert(
 function consolejson(x){
 	console.log(JSON.stringify(x));
 }
+
+// ! these must be invalidated/rebuilt if topology changes
+// fugly design :( 
+
+var g_enableEdgeSelection=false;	//experimental, so keep disabled.
+var g_selectedEdges= new Map();
+var g_allEdgeTags = new Map();
+var g_vertexVertexMap = new Map();
+var g_undoBuffer=[];
+
+// 'undo system': brute force document copy; only one-level
+// we can't just deep-copy though because of vertex references.
+
+function getClonedVertex(vim, pt){
+	if (!vim.has(pt)){
+		var newpt=cloneVertex(pt);
+		vim.set(vim, newpt);
+		return newpt;
+	}
+	else {return vim.get(pt);}
+}
+
+function cloneObject(vim, src){
+	var obj={};
+	obj.name=src.name;
+	obj.color=src.color;
+	obj.tag=src.tag;
+	obj.points=[];
+	for (var i=0; i<src.points.length; i++) {
+		obj.points.push(getClonedVertex(vim,src.points[i]));
+	}
+	// child objects..
+	if (src.polygons){
+		obj.polygons=[];
+		for (var i=0; i<src.polygons.length; i++) {	
+			obj.polygons.push(cloneObject(vim,src.polygons[i]));
+		}
+	}
+	return obj;
+}
+
+function UndoBuffer_Save() {
+	var vertexIndexMap = new Map();
+
+	g_undoBuffer=[];
+	for (var i=0; i<g_polys.length; i++) {
+		g_undoBuffer.push(cloneObject(vertexIndexMap,g_polys[i]));
+	}
+}
+
+function UndoBuffer_Restore() {
+	console.log("undo");
+	var swp = g_polys;
+	g_polys=g_undoBuffer;
+	g_undoBuffer=swp;
+}
+
+function DeselectAllEdges(){
+	g_selectedEdges = new Map();
+	g_vertexVertexMap = new Map();
+}
+
+function GetVertexVertexMapFor(vs){
+	if (g_vertexVertexMap.has(vs)){
+		return g_vertexVertexMap.get(vs);
+	} else{
+		var vm=new Map();
+		g_vertexVertexMap.set(vs,vm);
+		return vm;
+	}
+}
+// break all connections between 2 vertices?
+//... but how do we know it it's not replicated?
+function DeleteEdge(vs,ve){
+	var edge=GetEdge(vs,ve);
+	g_allEdgeTags.delete(edge);
+	g_selectedEdges.delete(edge);
+	var subf=function(v0,v1){
+		var vm=g_vertexVertexMap.get(v0);
+		if (vm){
+			vm.delete(v1);
+		}
+	}
+	subf(vs,ve);
+	subf(ve,vs);
+}
+
+function SplitEdge(edgeStart,edgeEnd,newPt){
+	foreachPolygon( function(pl){ splitEdgeOfPoly(pl, edgeStart,edgeEnd, newPt) } );
+	var edgeTag=GetEdgeTag(edgeStart,edgeEnd);
+			if (edgeTag){
+				SetEdgeTag(edgeStart,newPt,true);
+				SetEdgeTag(newPt,edgeEnd,true);
+			}
+
+	DeleteEdge(edgeStart,edgeEnd);
+}
+
+function GetEdge(vs,ve,pl){
+	var vsm=GetVertexVertexMapFor(vs);
+	var vem=GetVertexVertexMapFor(ve);
+	if (vsm.has(ve) && vem.has(vs)){
+		var edge0=vsm.get(ve);
+		var edge1=vem.get(vs);
+		if (edge0!=edge1){
+			alert("edge map integrity fail");
+		}
+		edge0.polys.set(pl,true);
+		return edge0;
+	}
+
+	// make a new edge..
+	var edge={start:vs,end:ve,polys:new Map()};
+	edge.polys.set(pl,true);
+	g_allEdgeTags.set(edge,false); // this holds the tag.
+	vsm.set(ve,edge);
+	vem.set(vs,edge);
+	return edge;
+}
+
+function SelectEdgesOfVertices(){
+	foreachEdgeOfPolygon(function(vs,ve,pl){
+		if (vs.tag || ve.tag){ SetEdgeTag(vs,ve,true);}
+	});
+}
+
+function SetEdgeTag(vs,ve,tag){
+	var edge=GetEdge(vs,ve);
+	if (!tag) {
+		g_selectedEdges.delete(edge);
+	} else {
+		g_selectedEdges.set(edge,true);
+	}
+	g_allEdgeTags.set(edge,tag);
+}
+function GetEdgeTag(vs,ve){return g_allEdgeTags.get(GetEdge(vs,ve));}
+function SelectEdge(vs,ve){SetEdgeTag(vs,ve,true);}
+function DeselectEdge(vs,ve){SetEdgeTag(vs,ve,false);}
+function ToggleEdgeTag(vs,ve){SetEdgeTag(vs,ve,GetEdgeTag(vs,ve)^true);}
+
+function edgeVertexDistSquared2d(edgeS,edgeE, pt){ //S,E=start,end of edge,pt=test point
+	var ofspt=v2sub(pt,edgeS);
+	var edgeV=v2sub(edgeE,edgeS);	//vector along edge
+	var edgeVsqr=v2dot(edgeV,edgeV);
+	var dp=v2dot(ofspt,edgeVsqr);
+	// use dp to find right zone..
+	if (dp<0){
+		return v2distSquared(edgeS,pt);
+	} else if (dp>edgeVsqr){
+		return v2distSquared(edgeE,pt);
+	}
+	// perp 2d dot prod for point-line dist
+	var perpdp = ofspt.x*edgeV.y-ofspt.y*edgeV.x;
+	// actualdist = perpdp / sqrt(edgeVsqr);
+	distSquared = perpdp*perpdp / (edgeVsqr); // same units as ords..
+	return distSquared;
+}
+
+function PickEdge(viewcursor,maxdist){
+	if (!g_enableEdgeSelection){
+		return {edge:null,distSqr:sqr(100000.0)}
+	}
+	// todo- raycast/occlusion..
+	var view=viewcursor.view;
+	var screenDistSqr=sqr(maxdist);
+	var theEdge=null;
+	foreachEdgeOfPolygon(function(vs,ve,pl){
+		var scr_vs=worldToScreen(view,vs);
+		var scr_ve=worldToScreen(view,ve);
+		dist=edgeVertexDistSquared2d(scr_vs,scr_ve, viewcursor.screenpos);
+		if (dist<screenDistSqr){
+			screenDistSqr=dist;
+			theEdge=GetEdge(vs,ve,pl);
+		}
+	});
+	return {edge:theEdge,distSqr:screenDistSqr};
+}
+
 function Info(){
 	console.log("show info");
 	var info="";
@@ -95,7 +275,8 @@ function NewImage(){
 }
 var g_shift,g_ctrl,g_alt,g_leftmousebutton,g_rightmousebutton,g_midmousebutton;
 var g_snapRadius=6;
-var g_drawFeedbackColor="red"
+var g_drawFeedbackColor="red";
+var g_selectionColor="red";
 editor=document.getElementById("editor");
 var g_presetLabels=["object","person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
 
@@ -227,6 +408,12 @@ if (urlgadget){
   } 
 }
 // mini maths lib
+function v2sub(a,b){return {x:a.x-b.x,y:a.y-b.y}}
+function v2add(a,b){return {x:a.x+b.x,y:a.y+b.y}}
+function v2madd(a,b,f){return {x:a.x+b.x*f,y:a.y+b.y*f}}
+function v2dot(a,b){return a.x*b.x+a.y*b.y;}
+function v2distSquared(a,b){var ofs=v2sub(b,a);return v2dot(ofs,ofs);}
+
 function vaddto(lhs,rhs){lhs.x+=rhs.x;lhs.y+=rhs.y; lhs.z+=rhs.z;}
 function vsubto(lhs,rhs){lhs.x-=rhs.x;lhs.y-=rhs.y; lhs.z-=rhs.z;}
 function vmaddto(lhs,rhs,f){lhs.x+=rhs.x*f;lhs.y+=rhs.y*f; lhs.z+=rhs.z*f;}
@@ -337,7 +524,7 @@ function viewIs2d(vw){
 }
 function screenToWorld(view, rspos){
 	var spos={};
-	spos=vchooseAxes(vsub(rspos,view.screenCentre),view.axis);
+	spos=vchooseAxesInv(vsub(rspos,view.screenCentre),view.axis);
 
 	return vadd(view.interestPoint,vscale(spos,1.0/view.zoom));
 //	return vsub(vscale(spos,view.zoom),view.interestPoint);
@@ -683,12 +870,15 @@ function pickOrEdgeSplitPoint(vc,maxr){
 	if (pick.pickedPoint){
 		// if it was an edge split.. perform the split
 		if (pick.edge){
+			SplitEdge(pick.edge[0],pick.edge[1],pick.pickedPoint);
+/*
 			foreachPolygon(function(pl){
 				if (PolyHasEdge(pl, pick.edge[0],pick.edge[1])){
 					console.log("split edge of "+pl.name);
 					splitEdgeOfPoly(pl, pick.edge[0],pick.edge[1], pick.pickedPoint);
 				}
 			});
+*/
 		}
 		return pick.pickedPoint;
 	}
@@ -1261,6 +1451,17 @@ function repaint(){
 		repaintView(context,vps[i]);
 	}
 }
+function drawSelectedEdges(viewCtx){
+	var ctx=viewCtx.context;
+	ctx.globalAlpha=1.0;
+	ctx.strokeStyle=g_selectionColor;
+	ctx.beginPath();
+	g_selectedEdges.forEach(function(val,edge,map){
+		vctMoveTo(viewCtx,edge.start);
+		vctLineTo(viewCtx,edge.end);
+	});
+	ctx.stroke();
+}
 function vctDrawAxialCross(vct,pos,size)
 {
    vct.context.beginPath();
@@ -1311,6 +1512,7 @@ function repaintView(context,vp) {
 
 //  if (g_currentPoly>g_polys.length){currentPoly=-1;}
   drawPolygons(context,vp,g_polys,null,false);
+	drawSelectedEdges(vct);
 //  drawHrc(context,50,50,g_polys);
 
    // draw InterestPoint
@@ -1958,7 +2160,6 @@ function splitEdgeOfPoly(poly, v0,v1, vmid) {
 	if (poly.points.length==2){
 	    if ((poly.points[0]==v0 && poly.points[1]==v1) || (poly.points[1]==v0 && poly.points[0]==v1) ) {
 			console.log("splitEdgeOfPoly-do edge split of"+poly.name);
-			
 			//var splitpoly=g_adjustPoint.poly;
 			poly.points[0]=v0;
 			poly.points[1]=vmid;
@@ -2074,6 +2275,7 @@ function foreachEdgeOfPolygon(f){
 }
 
 function Extrude(){
+	UndoBuffer_Save();
 	ExtrudeTaggedVertices();
 	// todo- 'push tool' sets yet another sub UI mode?
 	SetTool(g_translateTool);
@@ -2231,9 +2433,22 @@ function multiSelectMouseDown(e) {
       }
     }
 */
-	var pt=pickPointAt(viewCursor());
-	if (pt) {
-		if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
+	// test edge selection..
+	
+	var vc=viewCursor();
+	var pt=pickPointAt(vc);
+	var edgeSel=PickEdge(vc, g_snapRadius);
+	var edge=edgeSel.edge;
+
+	if (pt || edge) {
+		var ptDistSqr=pt?v2distSquared(vc.screenpos, worldToScreen(vc.view,pt)):sqr(1000000.0);
+		if (ptDistSqr<edgeSel.distSqr){
+			if (pt && pt.tag) {g_hackMoveTaggedVertices=true;}
+		} else {
+			if (edge){
+				ToggleEdgeTag(edge.start,edge.end);
+			}
+		}
 	} else{
 		g_multiSelectDrag=true;
 	}
@@ -2362,7 +2577,7 @@ function adjustToolMouseDrag(e){
         //newPt=g_mousepos;
         // step through all the polys again, because the vertices/edge may be shared.
 
-		foreachPolygon( function(pl){ splitEdgeOfPoly(pl, edgeStart,edgeEnd, newPt) } );
+		SplitEdge(edgeStart,edgeEnd, newPt);
 		pointToMove = newPt;
 		g_adjustPoint.edge=null;
 		g_adjustPoint.selPoint=newPt;
@@ -2847,6 +3062,7 @@ function numSelectedVertices(){
 	return accum;	
 }
 function MergeVertices(){
+	UndoBuffer_Save();
 	console.log("merge vertices");
 	var accum=vzero();
 	var total=0;
@@ -3212,6 +3428,7 @@ function SplitByTaggedVertices(newpls,pl){
 }
 
 function SubdivideByVertices(){
+	UndoBuffer_Save();
 	vtc=GetSelectedVertices();
 	g_polys=SubdivideByVerticesSub(g_polys);
 	vtc.forEach(function(val,pt,map){
@@ -3329,12 +3546,12 @@ editor.addEventListener('mousedown',function(e){readMousePos(e);editorMouseDownS
 
 function editorMouseDownSub(e){
 			console.log("editorMouseDown,button="+e.button);
-	
 		g_leftmousebutton=true;
 		if (e.button==2){
 			e.preventDefault();
 		} else {
 			// lbutton
+			UndoBuffer_Save();
 			g_dragstartpos=cloneVertex(g_mousePos);
 
 			console.log("g_ctrl="+g_ctrl);
@@ -3485,6 +3702,9 @@ function CreateUIGroup(dat,mainName,tooltip,mainfunc,subls) {
 		}
    }
   }
+  if (!subls){
+    btn.className="subbutton";
+  }
 
   btn.onclick= function(){setSubButtons(dat,btn);}
   
@@ -3495,10 +3715,12 @@ function setSubButtons(dat,btn){//mainName,mainfunc,btn,subls){
 	var mainName=dat.name;
 	var mainfunc=dat.onpress;
 	var subls=dat.sub;
-    for (var i=0; i<g_nextUiGroup; i++) {
-       getTopButton(i).style.background="#e0e0e0";
-    }
-    btn.style.background="#ffffff";
+	if (dat.sub){
+	    for (var i=0; i<g_nextUiGroup; i++) {
+		   getTopButton(i).style.background="#e0e0e0";
+		}
+	    btn.style.background="#ffffff";
+	}
     console.log("ui:"+mainName);
     if (mainfunc){
       mainfunc();
@@ -3514,7 +3736,7 @@ function setSubButtons(dat,btn){//mainName,mainfunc,btn,subls){
 		subf=sub.onpress;
 		sbtn.onclick=compose(subf,repaint); // sub.composed_func
     }
-    for (i=subls.length;i<15-g_nextUiGroup; i++){
+    for (i=subls.length;i<17-g_nextUiGroup; i++){
        var sbtn=document.getElementById("b"+(g_nextUiGroup+i));
        sbtn.onclick=null;
        sbtn.innerHTML="";
@@ -3530,8 +3752,9 @@ function uidone(){
 }
 
 function DeselectAll(){
-  foreachVertex(function(v){v.tag=false;});
-  repaint();
+	foreachVertex(function(v){v.tag=false;});
+	DeselectAllEdges();
+	repaint();
 }
 function SelectAll(){
   foreachVertex(function(v){v.tag=true;});
@@ -3628,6 +3851,7 @@ function findButtonInfo(name){
    return null;
 }
 g_uigroups=[
+	{name:"undo", info:"undo/redo last operation", onpress:UndoBuffer_Restore, sub:null},
 	{name:"file",
 		info:"file management,misc",
 		onpress:null,
@@ -3659,10 +3883,11 @@ g_uigroups=[
 		]
 	},
 
-	{	name:"vertex",
+	{	name:"mesh",
 		info:"vertex selection and mesh manipulation tools",
 		onpress:mkset(g_selectTool),
 		sub:[
+			{name:"adjust",onpress:mkset(g_adjustTool),sub:null},
 		  {name:"subdiv",onpress:SubdivideByVertices},
 		  {name:"extrude",onpress:Extrude},
 		  {name:"seperate",onpress:SeperateVertices},
@@ -3671,6 +3896,17 @@ g_uigroups=[
 		  {name:"delete",onpress:DeleteVertices}
 		]
 	},
+/*	// not ready yet.
+	{	name:"edge",
+		info:"edge related tools",
+		onpress:mkset(g_selectTool),
+		sub:[
+			{name:"edges of vertices",onpress:SelectEdgesOfVertices},
+//			{name:"vertices between edges,onpress:SelectEdgesByVertices"},
+//			{name:"edge loop",onpress:SelectEdgeLoops}
+		]
+	},
+*/
 	{
 		name:"select",	// popup menu
 		onpress:mkset(g_selectTool),
@@ -3762,7 +3998,7 @@ window.addEventListener('keydown',  function(e){
   //v
   else if (kc==86){if (isCommandModifier(e)) {PasteFromClipboard()} else {ViewToggle();}}  
   //z
-  else if (kc==90){}
+  else if (kc==90){if (g_ctrl){UndoBuffer_Restore();}}
 
   else if (kc==79){SetTool(g_pointTool)}
   else if (kc==84){SetTool(g_selectTool)}
