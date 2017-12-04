@@ -4,28 +4,46 @@
 <style>body{overflow:hidden; width:100%;height:100%;}
 </style>
 <div id="genImages"></div>
-<div>
-<button class="button" value="" id="b0">b0</button>
-<button class="button" value=""id="b1">b1</button>
-<button class="button" value=""id="b2">b2</button>
-<button class="button" value=""id="b3">b3</button>
-<button class="button" value=""id="b4">b4</button>
-<button class="button" value=""id="b5">b5</button>
-<button class="button" value=""id="b6">b6</button>
-<button class="button" value=""id="b7">b7</button>
-<button class="button" value=""id="b8">b8</button>
-<button class="button" value=""id="b9">b9</button>
-<button class="button" value=""id="b10">b10</button>
-<button class="button" value=""id="b11">b11</button>
-<button class="button" value=""id="b12">b12</button>
-<button class="button" value=""id="b13">b13</button>
-<button class="button" value=""id="b14">b14</button>
-<button class="button" value=""id="b15">b15</button>
-<button class="button" value=""id="b16">b16</button>
-<input class="button" id="currentLabel" value="object"title="current label used for new elements">label</button>
-
-<canvas id="editor" width="100pc" height="100pc">
-</canvas>
+<div style="width:100%;" id="mainarea">
+<div style="float:left; width:5%;" id="toolbar">
+<div><button class="button" value="" id="b0">b0</button></div>
+<div><button class="button" value=""id="b1">b1</button></div>
+<div><button class="button" value=""id="b2">b2</button></div>
+<div><button class="button" value=""id="b3">b3</button></div>
+<div><button class="button" value=""id="b4">b4</button></div>
+<div><button class="button" value=""id="b5">b5</button></div>
+<div><button class="button" value=""id="b6">b6</button></div>
+<div><button class="button" value=""id="b7">b7</button></div>
+<div><button class="button" value=""id="b8">b8</button></div>
+<div><button class="button" value=""id="b9">b9</button></div>
+<div><button class="button" value=""id="b10">b10</button></div>
+<div><button class="button" value=""id="b11">b11</button></div>
+<div><button class="button" value=""id="b12">b12</button></div>
+<div><button class="button" value=""id="b13">b13</button></div>
+<div><button class="button" value=""id="b14">b14</button></div>
+<div><button class="button" value=""id="b15">b15</button></div>
+<div><button class="button" value=""id="b16">b16</button></div>
+<div>label:</div>
+<div><input class="inpbutton"  id="currentLabel" value="object" title="current label used for new elements"></input></div>
+ </div>
+ <div style="float:right; width:95%;">
+ <canvas id="editor" width="100pc" height="100pc">
+ </canvas>
+ </div>
+</div>
+<style type="text/css">
+    .container {
+      width:500px;
+    }
+    .left {
+      width:250px;
+      float:left;
+    }
+    .right {
+      width:250px;
+      float:right;
+    }
+</style>
 <script>
 console.log("hello world 109412");
 
@@ -315,8 +333,11 @@ var g_currPoly=null;
 var g_drawingPoly=[];
 var g_presetLabelIndex=0;
 var g_cursorTxt=0;
-var g_showLabelNames=true;
-var g_showAllPolys=true;
+var g_show={
+	labelNames:true,
+	allPolys:true,
+	parenting:true
+}
 var g_currentPolyOutline="#ffffff";
 var g_promptSevereTools=true;
 var g_ctrlIsMultiSelect=true;
@@ -373,7 +394,11 @@ function frameImage(){
 g_img.onload=function(){
   console.log("image.onload");
   //scale to the image and the window on loading
-  editor.width=window.innerWidth;
+  var mainarea=document.getElementById("mainarea");
+  mainarea.width=window.innerWidth;
+  mainarea.height=window.innerWidth;
+
+  editor.width=window.innerWidth*0.95;
   editor.height=window.innerHeight;
 
   g_imageWorldSize=vfromxyz(g_img.width,g_img.height,0);
@@ -415,6 +440,10 @@ function v2add(a,b){return {x:a.x+b.x,y:a.y+b.y}}
 function v2madd(a,b,f){return {x:a.x+b.x*f,y:a.y+b.y*f}}
 function v2dot(a,b){return a.x*b.x+a.y*b.y;}
 function v2distSquared(a,b){var ofs=v2sub(b,a);return v2dot(ofs,ofs);}
+function v2norm(a){var f=1.0/Math.sqrt(a.x*a.x+a.ya.y); return {x:a.x*f,y:a.y*f}};
+function v2rot90(a){return {x:-a.y, y:a.x}};
+function v2neg(a){return {x:-a.x, y:-a.y}};
+function v2scale(a,f){return {x:a.x*f, y:a.y*f}};
 
 function vaddto(lhs,rhs){lhs.x+=rhs.x;lhs.y+=rhs.y; lhs.z+=rhs.z;}
 function vsubto(lhs,rhs){lhs.x-=rhs.x;lhs.y-=rhs.y; lhs.z-=rhs.z;}
@@ -896,7 +925,7 @@ function pickOrMakePointEdgeSplit(vc,maxr){
 
 
 function IsVisible(pl){
-   if (g_showAllPolys){return true;}
+   if (g_show.allPolys){return true;}
    return pl==g_currPoly;
 }
 
@@ -1475,6 +1504,22 @@ function drawSelectedEdges(viewCtx){
 	});
 	ctx.stroke();
 }
+function vctDrawArrow(vct,vstart,vend,size){
+	var svs=worldToScreen(vct.view,vstart);
+	var sve=worldToScreen(vct.view,vend);
+	var edgev=v2sub(sve,svs);
+	var axis=v2norm(edgev);
+	var h_ofs=v2scale(v2rot90(axis),size*0.5);
+	var headbase=v2madd(sve, axis,-size);
+	var ctx=vct.context;
+	vmoveto(ctx,svs);
+	vlineto(ctx,headbase);
+	vlineto(ctx,v2sub(headbase,h_ofs));
+	vlineto(ctx,sve);
+	vlineto(ctx,v2add(headbase,h_ofs));
+	vlineto(ctx,headbase);
+
+}
 function vctDrawAxialCross(vct,pos,size)
 {
    vct.context.beginPath();
@@ -1486,6 +1531,19 @@ function vctDrawAxialCross(vct,pos,size)
    vctLineTo(vct, vfromxyz(pos.x, pos.y, pos.z+size));
    vct.context.stroke();
 }
+function drawParentingSub(vct, polys, parentPos){
+	if (!polys){return;}
+	polys.forEach(function(pl){
+		
+		if (parentPos){
+			vctDrawArrow(vct, parentPos,pl.centre, 10);
+		}
+		if (pl.polygons){
+			drawParentingSub(vct,pl.polygons,pl.centre);
+		}
+	});
+}
+
 function repaintView(context,vp) {
 	context.save();
 	context.beginPath();
@@ -1525,6 +1583,12 @@ function repaintView(context,vp) {
 
 //  if (g_currentPoly>g_polys.length){currentPoly=-1;}
   drawPolygons(context,vp,g_polys,null,false);
+  if (g_show.parenting || g_tool==g_parentTool){
+	  context.beginPath();
+	  drawParentingSub(vct,g_polys, null);
+	  context.stroke();
+	}
+
 	drawSelectedEdges(vct);
 //  drawHrc(context,50,50,g_polys);
 
@@ -1540,7 +1604,9 @@ function repaintView(context,vp) {
 			drawFeedbackMultiSelect(context);
 		}
 		else
-		if (g_tool && g_tool.drawfeedback){g_tool.drawfeedback(context);}
+		if (g_tool && g_tool.drawfeedback){
+			g_tool.drawfeedback(context);
+		}
 
   }
   if (g_cursorTxt){
@@ -1614,7 +1680,8 @@ function drawPolygons(context,vp,polys,parent,sel){
     }
 
     // get the centroid
-    pos=worldToScreen(vp,polyCentre(pl.points));
+	pl.centre=polyCentre(pl.points);
+    pos=worldToScreen(vp,pl.centre);
     // stroke the outline
     context.strokeStyle = currentPolyOutlineColor;
     context.globalAlpha=0.75;
@@ -1639,7 +1706,7 @@ function drawPolygons(context,vp,polys,parent,sel){
     context.stroke();
     // draw the label name.
     context.globalAlpha=0.75;
-    if (g_showLabelNames && pl.name){
+    if (g_show.labelNames && pl.name){
       var textWidth = context.measureText(pl.name).width;
    
 // text label black background
@@ -1754,6 +1821,15 @@ function dumpHrc(pls,indent){
 		if (pl.polygons){dumpHrc(pl.polygons, indent+1);}
 	}
 }
+function reparentTo(obj,parent){
+	var objs=getListContainingPoly(obj);
+	removeFromArray(objs,obj);
+	if(parent){
+		addChild(parent,obj);
+	} else {
+		g_polys.push(obj);
+	}
+}
 g_parentTool={
 	name:"set object parents (pick parts)",
 	drawfeedback:function(ctx){
@@ -1772,10 +1848,13 @@ g_parentTool={
 		var poly=pickPolyAt(viewCursor());
 		if (!g_currPoly){g_currPoly=poly; repaint();}
 		else if (g_currPoly && poly){
+			if (g_currPoly==poly){
+				//'parent to self' == unparent
+				reparentTo(poly,null);
+				g_currPoly=null;
+			} else
 			if(!isParentOf(g_currPoly,poly) && poly!=g_currPoly){
-				pls=getListContainingPoly(poly);
-				removeFromArray(pls,poly);
-				addChild(g_currPoly,poly);
+				reparentTo(poly,g_currPoly);
 			}
 		}
 		console.log("after:-"+g_polys.length);
@@ -3655,13 +3734,21 @@ function isCommandModifier(e){
 	return (g_ctrl || e.getModifierState("OS"));
 }
 
-function FrameAll(){
+function ViewFrameAll(){
 	if (g_img){
 		console.log("framing image\n");
 		frameImage();
 	} else{
 		console.log("TODO: frame current meshes\n");
 	}
+}
+function ViewCentreSelection(){
+	var centre=GetSelectedVerticesCentroid();
+	if (centre){
+		g_viewCentre=centre;
+		repaint();
+	}
+	
 }
 
 editor.addEventListener('contextmenu',
@@ -3902,7 +3989,7 @@ g_uigroups=[
 	},
 	{name:"transform",info:"scale,rotate,translate",onpress:mkset(g_translateTool),
 		sub:[
-			{name:"adjust points/edges",onpress:mkset(g_adjustTool),sub:null},
+			{name:"adjust",onpress:mkset(g_adjustTool),sub:null},
 			{name:"translate",onpress:mkset(g_translateTool)},
 			{name:"rotate",onpress:mkset(g_rotateTool)},
 			{name:"scale",onpress:mkset(g_scaleTool)},
@@ -3963,9 +4050,11 @@ g_uigroups=[
 		info:"view options",
 		onpress:null,
 		sub:[
-			{name:"show polys",onpress:function(){g_showAllPolys^=true}},
-			{name:"show labels",onpress:function(){g_showLabelNames^=true}},
-			{name:"frame all",onpress:FrameAll},
+			{name:"show polys",onpress:function(){g_show.allPolys^=true}},
+			{name:"show labels",onpress:function(){g_show.labelNames^=true}},
+			{name:"show parenting",onpress:function(){g_show.parenting^=true}},
+			{name:"frame all",onpress:ViewFrameAll},
+			{name:"centre selected",onpress:ViewCentreSelection},
 			{name:"single view",onpress:function(){g_viewMode=0}},
 			{name:"3d view",onpress:function(){g_viewMode=2}}
 		]
@@ -4044,11 +4133,11 @@ window.addEventListener('keydown',  function(e){
   else if (kc==187){ZoomByAt(viewCursor(),1.2);}
   else if (kc==189){ZoomByAt(viewCursor(),1.0/1.2);}
 
-  if (kc==70){console.log("pressed f");FrameAll();}
+  if (kc==70){console.log("pressed f");ViewFrameAll();}
 
-  var step=40.0;
+  var step=g_ctrl?5.0:g_shift?40.0:20.0;
   var vp=getViewport(g_mousePos);
-  var sdelta=vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step,0);
+  var sdelta=vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step, keyDelta(kc,33,34)*step);
   vaddto(g_viewCentre,screenDeltaToWorld({cursor:g_mousePos,view:vp},sdelta));
 // todo .. parenting, renaming , delete vertex,...
   //readMousePos(e);
