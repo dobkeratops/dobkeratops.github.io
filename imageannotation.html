@@ -31,6 +31,7 @@ console.log("hello world 109412");
 
 function Help(){alert(
 "hotkeys:\no\tdraw-points tool\nl\tdraw-line tool\nr\tdraw-rect tool\np\tdraw-poly tool\na\tadjust tool (move points & split edges)\n[ ]\ttoggle preset labels;\nenter\trename object;\n< >\tswitch current poly\n"+
+"ctrl-z\tundo/redo last operation\n"+
 "ctrl-x\tdelete polys or vertices\n"+
 "save\tdownloads current annotations as JSON\n"+
 "drag-drop JSON file to load image & annotations\n"+
@@ -71,40 +72,41 @@ var g_undoBuffer=[];
 // 'undo system': brute force document copy; only one-level
 // we can't just deep-copy though because of vertex references.
 
-function getClonedVertex(vim, pt){
-	if (!vim.has(pt)){
+function getClonedVertex(maps, pt){
+	if (!maps.vertexMap.has(pt)){
 		var newpt=cloneVertex(pt);
-		vim.set(vim, newpt);
+		maps.vertexMap.set(pt, newpt);
 		return newpt;
 	}
-	else {return vim.get(pt);}
+	else {return maps.vertexMap.get(pt);}
 }
 
-function cloneObject(vim, src){
+function cloneObject(maps, src){
 	var obj={};
 	obj.name=src.name;
 	obj.color=src.color;
 	obj.tag=src.tag;
 	obj.points=[];
+	maps.objectMap.set(src,obj);
 	for (var i=0; i<src.points.length; i++) {
-		obj.points.push(getClonedVertex(vim,src.points[i]));
+		obj.points.push(getClonedVertex(maps,src.points[i]));
 	}
 	// child objects..
 	if (src.polygons){
 		obj.polygons=[];
 		for (var i=0; i<src.polygons.length; i++) {	
-			obj.polygons.push(cloneObject(vim,src.polygons[i]));
+			obj.polygons.push(cloneObject(maps,src.polygons[i]));
 		}
 	}
 	return obj;
 }
 
 function UndoBuffer_Save() {
-	var vertexIndexMap = new Map();
+	var maps={vertexMap:new Map(), objectMap:new Map()};
 
 	g_undoBuffer=[];
 	for (var i=0; i<g_polys.length; i++) {
-		g_undoBuffer.push(cloneObject(vertexIndexMap,g_polys[i]));
+		g_undoBuffer.push(cloneObject(maps,g_polys[i]));
 	}
 }
 
@@ -1173,7 +1175,12 @@ function drawFeedbackSelectTool(ctx){
 //	drawFeedbackPickPolyPoint(ctx);
 	if (isDragging()){ drawFeedbackDragRect(ctx);return};
 	var vc=viewCursor();
+	var vct={view:vc.view,context:ctx};
 	var pt = pickPointAt(vc);
+	vinfo=GetSelectedVerticesInfo();
+	if (vinfo.num>1){
+		drawSelectionCentroid(vct,vinfo.centroid);
+	}
 	if (pt){
 		var spos=worldToScreen(viewCursor().view,pt);
 		drawNewCrosshair(ctx,spos);
@@ -1211,18 +1218,24 @@ function drawCrosshairSub(context,cursor,alpha,color,inner,size){
 function drawCrosshair(context,cursor,size){
 	drawCrosshairSub(context,cursor,0.5,"#ffffff",0,size);
 }
+function drawSelectionCentroid(vct,centroid){
+	if (!centroid){return;}
+	var spos=worldToScreen(vct.view, centroid);
+	var ctx=vct.context;
+	drawCrosshairSub(ctx,spos,0.75, "#ffffff",g_snapRadius*2, g_snapRadius*4.0);
+	ctx.beginPath();
+	ctx.strokeStyle="#ffffff";
+	ctx.globalAlpha=0.75;
+	ctx.arc(spos.x,spos.y, g_snapRadius*2.0, 0,2*Math.PI);
+	ctx.stroke();
 
+}
 function drawFeedbackTransformTool(context){
 	var vc=viewCursor();
-	var centroid=GetSelectedVerticesCentroid()
+	var vct={view:vc.view,context:context}
+	var centroid=GetSelectedVerticesCentroid();
+	drawSelectionCentroid(vct,centroid);
 	//todo this should work per viewport, in 3d views mode
-	var spos=worldToScreen(vc.view, centroid);
-	drawCrosshairSub(context,spos,0.75, "#ffffff",g_snapRadius*2, g_snapRadius*4.0);
-	context.beginPath();
-	context.strokeStyle="#ffffff";
-	context.globalAlpha=0.75;
-	context.arc(spos.x,spos.y, g_snapRadius*2.0, 0,2*Math.PI);
-	context.stroke();
 	// transform tools can pick points or drag the whole.
 	drawFeedbackPickPoint(context);	
 }
@@ -1785,7 +1798,7 @@ if (!Array.prototype.last){
 
 
 g_lassoDrawTool={
-	name:"draw-lasso tool",
+	name:"freehand draw poly tool",
 	drawfeedback:drawFeedbackDrawPoly,
 	activate: function(e){g_drawingPoly=[]; SetCursor("crosshair");},
 	mousedrag:function(e){
@@ -1827,7 +1840,7 @@ g_lassoDrawTool={
 			console.log("remove vertex "+besti+" of "+g_drawingPoly.length);
 			g_drawingPoly.splice(besti,1);
 		}
-		AddPoly({points:g_drawingPoly,name:getCurrentLabel(),drawnby:"lasso"});
+		AddPoly({points:g_drawingPoly,name:getCurrentLabel(),drawnby:"freehand"});
 		g_drawingPoly=[];
 	},
 	cancel:function(e){
@@ -1919,6 +1932,7 @@ function makeDrawToolVariant(_name,drawFn,rclickfn){
 }
 
 function TranslateVerticesByDrag(fn){
+	
 	var worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
 	vtc=GetSelectedVertices();
 	vtc.forEach(function(val,vt,map){
@@ -2066,6 +2080,10 @@ g_polyTool=makeDrawToolVariant(
 );
 
 function AddEdgeMaybeSplitPoly(vstart,vend,setupNewPoly){
+	if (!vstart || !vend){
+		console.log("add edge - needs both vertices");
+		return;
+	}
 	// it might split many polys.
 	var pl=DoesEdgeSplitPoly(vstart,vend);
 	// either add an edge or a polygon
@@ -2477,8 +2495,8 @@ function multiSelectTagPoint(e){
 // open clicks make new vertices for line drawing.
 // it's really more like the line-draw tool with added vertex-dragging
 var g_multiToolLastPoint=null;
-g_multiTool={
-	name:"drag-adjust vertices, drag-edgesplit, and draw edges from tag",
+g_polyLineTool={
+	name:"Click-draw edges from last tag; RMB=end line,Drag:adjust vertices, drag from edge:edgesplit",
   activate:function(e){g_multiToolLastPoint=null; g_drawingPoly=[];},
   drawfeedback:drawFeedbackMultiTool, 
   mousedown: function(e){
@@ -2535,14 +2553,18 @@ g_multiTool={
 	g_drawingPoly=[]; // cancels poly draw.
   },
   mousedragend: function(e){
-	console.log("multitool drag end");
+	console.log("polyline drag end");
 	if (g_multiToolLastPoint){
 		g_multiToolLastPoint.tag=false;
 		g_multiToolLastPoint=null;//we dont draw from point adjustments
 	}
   },
-  // cancel,bound to escape key
-	mouserightclick:MultiToolCancel,
+  // right-click - draw and finish
+  mouserightclick:function(e){
+	var clickPt=pickOrMakePointEdgeSplit(viewCursor(),g_snapRadius);
+	AddEdgeMaybeSplitPoly(g_multiToolLastPoint, clickPt,null);
+	MultiToolCancel();	
+  },
   cancel: MultiToolCancel,
   // click - like 'adjust tool', 
   // except it might draw edges if points are tagged.
@@ -3324,6 +3346,13 @@ function GetVertexMapExtents(selVertexMap){
 function GetSelectedVerticesCentroid(){//GetSelectedVerticesCentroid() GetCentroid()
 	return GetVertexMapCentroid(GetSelectedVertices());
 }
+function GetSelectedVerticesInfo(){
+	var sel=GetSelectedVertices();
+	return {
+		num:sel.size,
+		centroid:GetVertexMapCentroid(sel)
+	}
+}
 
 function PasteFromClipboard(){
 	console.log("paste/duplicate - no clipboard yet so we paste");
@@ -3431,9 +3460,6 @@ function SubdivideByVertices(){
 	UndoBuffer_Save();
 	vtc=GetSelectedVertices();
 	g_polys=SubdivideByVerticesSub(g_polys);
-	vtc.forEach(function(val,pt,map){
-		pt.tag=false;
-	});
 }
 function SubdivideByVerticesSub(polys){
 	// every edge- potentially split in the middle.
@@ -3489,6 +3515,7 @@ function SubdivideByVerticesSub(polys){
 			console.log("subdiv- whole poly "+i);
 			// subdivide edges and whole polygon:-
 			polymidv=polyCentre(pl.points);
+			polymidv.tag=true;
 			for (vti=0; vti<pl.points.length; vti++){
 				// splitting in this order retains obvious quad subdiv
 				console.log("subdiv- whole poly"+i+" createSub"+vti);
@@ -3866,10 +3893,10 @@ g_uigroups=[
 	{name:"draw",info:"primitive drawing tools",onpress:mkset(g_polyTool),
 		sub:[
 			{name:"points",onpress:mkset(g_pointTool)},
-			{name:"poly-line",onpress:mkset(g_multiTool)}, // default..
+			{name:"poly-line",onpress:mkset(g_polyLineTool)}, // default..
 			{name:"rect",onpress:mkset(g_rectTool)},
 			{name:"poly",onpress:mkset(g_polyTool)},
-			{name:"lasso",onpress:mkset(g_lassoDrawTool)},
+			{name:"freehand",info:"lasso style freehand drawing tool, drag continuously to enclose an area",onpress:mkset(g_lassoDrawTool)},
 			{name:"cancel",onpress:Cancel}
 		]
 	},
@@ -3912,7 +3939,7 @@ g_uigroups=[
 		onpress:mkset(g_selectTool),
 		sub:[
 		  {name:"deselect",onpress:DeselectAll},
-		  {name:"all",onpress:SelectAll},
+//		  {name:"all",onpress:SelectAll}, // dont need because it's 'deselect,invert'
 		  {name:"invert",onpress:InvertSelection},
 				{name:"connected by polys", onpress:SelectVerticesConnectedByPolygons},
 				{name:"connected by edges", onpress:SelectVerticesConnectedByEdges},
