@@ -27,7 +27,7 @@
 <div><input class="inpbutton"  id="currentLabel" value="object" title="current label used for new elements"></input></div>
  </div>
  <div style="float:right; width:92%;">
- <canvas id="editor" width="100pc" height="100pc">
+ <canvas id="editorCanvas" width="100pc" height="100pc">
  </canvas>
  </div>
 </div>
@@ -71,6 +71,7 @@ function Help(){alert(
 "V\ttoggle views (main,nav,3d)\n"+
 "shift-P\tparent(parts) tool:  \n\tClick the 'parent', then click each desired part (child)\n"+
 "alt-P\tdraw quadstrip\n"+
+"; '\tnudge point depth\n\t(e.g. inc/dec z in xy view)\n"+
 "'tag' here means 'selected'\n"
 )
 };
@@ -86,9 +87,11 @@ var g_selectedEdges= new Map();
 var g_allEdgeTags = new Map();
 var g_vertexVertexMap = new Map();
 var g_undoBuffer=[];
-
+var g_viewDist=500.0;
+var g_gl;
 // 'undo system': brute force document copy; only one-level
 // we can't just deep-copy though because of vertex references.
+
 
 function getClonedVertex(maps, pt){
 	if (!maps.vertexMap.has(pt)){
@@ -292,13 +295,23 @@ function NewImage(){
   LoadImage(url);
   g_polys=[];
   repaint();
+
 }
 var g_shift,g_ctrl,g_alt,g_leftmousebutton,g_rightmousebutton,g_midmousebutton;
 var g_snapRadius=6;
 var g_drawFeedbackColor="red";
 var g_selectionColor="red";
-editor=document.getElementById("editor");
+var editorCanvas=document.getElementById("editorCanvas");
 var g_presetLabels=["object","person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
+
+initGL(editorCanvas);
+var gl;
+function initGL(canvas){
+	gl=canvas.getContext("webgl2");
+	gl.viewportWidth=canvas.width;
+	gl.viewportHeight=canvas.height;
+}
+
 
 labelEdit=document.getElementById("currentLabel");
 //? only got dropdown, not combo boxes?
@@ -356,10 +369,11 @@ var g_selectedColor="white";
 var g_labelColor="white";
 var g_hackMoveTaggedVertices=false;
 var g_view=null;
-var g_viewCentre=vfromxyz(editor.width/2,editor.height/2,0);
+var g_interestPoint=vfromxyz(editorCanvas.width/2,editorCanvas.height/2,0);
 var g_zoom=1.0;
 var g_imageWorldSize=vfromxyz(1,1,0);
-var g_viewMode=0;
+var g_viewLayoutMode=0;
+var g_viewAngle={x:0.0,y:0.0,z:0.0};
 // default image to load..
 function parseUrlParams(url) {
   var urlParams = {};
@@ -384,11 +398,11 @@ if (!g_img.src){
 
 
 function frameImage(){
-  g_zoom = Math.min(editor.width/g_imageWorldSize.x,editor.height/g_imageWorldSize.y);
+  g_zoom = Math.min(editorCanvas.width/g_imageWorldSize.x,editorCanvas.height/g_imageWorldSize.y);
   //want worldToScreen(viewCentre)=screenCentre
   //
 //  g_viewCentre=vfromxyz(0,0,0);
-  g_viewCentre=vfromxyz(g_imageWorldSize.x/2,g_imageWorldSize.y/2,0);
+  g_interestPoint=vfromxyz(g_imageWorldSize.x/2,g_imageWorldSize.y/2,0);
 
 }
 g_img.onload=function(){
@@ -398,8 +412,8 @@ g_img.onload=function(){
   mainarea.width=window.innerWidth;
   mainarea.height=window.innerWidth;
 
-  editor.width=window.innerWidth*0.92;
-  editor.height=window.innerHeight;
+  editorCanvas.width=window.innerWidth*0.92;
+  editorCanvas.height=window.innerHeight;
 
   g_imageWorldSize=vfromxyz(g_img.width,g_img.height,0);
   frameImage();
@@ -483,12 +497,96 @@ function vlength(a){return Math.sqrt(vsqr(a));}
 function vlengthBetween(a,b){return vlength(vsub(b,a));}
 function vdist(a,b){return vlength(vsub(a,b));}
 function vdistSquared(a,b){return vsqr(vsub(a,b));}
+function vscaleToLen(v,len){f = len/vlength(v); return vscale(v,f);}
 function vcross(a,b){
 	return {
 		x:a.y*b.z-a.z*b.y,
 		y:a.z*b.y-a.y*b.z,
 		z:a.x*b.y-a.y*b.x}
 }
+function m3x3FromAxes(ax,ay,az){return {ax:ax, ay:ay, az:az}};
+function m3x4FromAxes(ax,ay,az,aw){return {ax:ax, ay:ay, az:az, aw:aw}};
+function m3x3MulVec(m,v){
+	return vmadd(vmadd( vscale(m.ax, v.x), m.ay,v.y), m.az, v.z);
+}
+function m3x4MulVec(m,v){
+	return vmadd(vmadd( vmadd(m.aw, m.ax, v.x), m.ay,v.y), m.az, v.z);
+}
+function m3x3OrthoInvMulVec(m,v){
+	return {x: vdot(m.ax,v), y:vdot(m.ay,v), z:vdot(m.az,v)};
+}
+function m3x4OrthoInvMulVec(m,v){
+	var ofs=vsub(v,m.aw);
+	return {x: vdot(m.ax,v), y:vdot(m.ay,v), z:vdot(m.az,v)};
+}
+function m3x3Mul(a,b){
+	return {
+		ax:m3x3MulVec(a, b.ax),
+		ay:m3x3MulVec(a, b.ay),
+		az:m3x3MulVec(a, b.az)
+			};
+}
+function m3x4Mul(a,b){
+	return {
+		ax:m3x3MulVec(a, b.ax),
+		ay:m3x3MulVec(a, b.ay),
+		az:m3x3MulVec(a, b.az),
+		aw:m3x4MulVec(a, b.aw)
+			};
+}
+function m3x3OrthoInv(m){
+	return {
+		ax:vfromxyz(m.ax.x, m.ay.x, m.az.x),
+		ay:vfromxyz(m.ax.y, m.ay.y, m.az.y),
+		az:vfromxyz(m.ax.z, m.ay.z, m.az.z)
+	};
+}
+function m3x4OrthoInv(m){
+	return {
+		ax:vfromxyz(m.ax.x, m.ay.x, m.az.x),
+		ay:vfromxyz(m.ax.y, m.ay.y, m.az.y),
+		az:vfromxyz(m.ax.z, m.ay.z, m.az.z),
+		aw:m3x3OrthoInvMulVec(m, vneg(m.aw))
+	};
+}
+function m3x3OrthnoNormalizeYZX(m){
+	var ay=vnorm(m.ay);
+	var az=vnorm(vperp(m.az, ay));
+	var ax=vnorm(vcross(az, ay));
+	return m3x3FromAxes(ax,ay,az);
+}
+function m3x3OrthnoNormalizeZYX(m){
+	var az=vnorm(m.az);
+	var ay=vnorm(vperp(m.ay, az));
+	var ax=vnorm(vcross(az, ay));
+	return m3x3FromAxes(ax,ay,az);
+}
+function m3x4FromMatPos(m,pos){
+	return m3x3FromAxes(m.ax,m.ay,m.az, pos);
+}
+function m3x3RotX(a){
+	var c=Math.cos(a),s=Math.sin(a);
+	return m3x3FromAxes(
+		vfromxyz(1.0, 0.0, 0.0),
+		vfromxyz(0.0, c,   s),
+		vfromxyz(1.0, -s,  c));
+}
+function m3x3RotY(a){
+	var c=Math.cos(a),s=Math.sin(a);
+	return m3x3FromAxes(
+		vfromxyz(c,   0.0, s),
+		vfromxyz(0.0, 1.0, 0.0),
+		vfromxyz(-s,  0.0, c));
+}
+function m3x3RotZ(a){
+	var c=Math.cos(a),s=Math.sin(a);
+	return m3x3FromAxes(
+		vfromxyz(c,   s,   0.0),
+		vfromxyz(-s,  c,   0.0),
+		vfromxyz(0.0, 0.0, 1.0));
+}
+
+
 function vnorm(a){ return vscale(a,1.0/Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z))}
 function vtrianglenorm(a,b,c){return vnorm(vcross(vsub(b,a),vsub(c,a)));}
 function vperp(a,n){ return vmadd(a,n, -vdot(a,n));}
@@ -508,32 +606,34 @@ var g_height = window.innerHeight;
 function lerp(a,b,f){
    return (b-a)*f+a;
 }
+function invlerp(x0,x1,x){return (x-x0)/(x1-x0);}
+
 // transformations
-g_axisName=["XZ","ISO","XY","ZY"];
-function vchooseAxes(rwpos,axis){
-	if (axis==1){//pixelart isometric..
+g_viewModeName=["XZ","ISO","XY","ZY","perspective"];
+function vchooseAxes(rwpos,vm){
+	if (vm==1){//pixelart isometric..
 		return {
 			x:rwpos.x+rwpos.z,
 			y:rwpos.y+(rwpos.x-rwpos.z)/2,
 			z:(rwpos.z-rwpos.x)/2};
 	}
-	if (axis==2){
+	if (vm==2){
 		return{x:rwpos.x, y:rwpos.y, z:rwpos.z}
-	} else if (axis==3){
+	} else if (vm==3){
 		return{x:rwpos.z, y:rwpos.y, z:rwpos.x}
-	} else if (axis==0){
+	} else if (vm==0){
 		return{x:rwpos.x, y:-rwpos.z, z:rwpos.y}
 	}
 }
-function vchooseAxesInv(src,axis){
-	if (axis==2){
+function vchooseAxesInv(src,vm){
+	if (vm==2){
 		return{x:src.x, y:src.y, z:src.z};
-	} else if (axis==3) {
+	} else if (vm==3) {
 		return{x:src.z, y:src.y, z:src.x};
 	
-	} else if (axis==0) {
+	} else if (vm==0) {
 		return{x:src.x, y:src.z, z:-src.y};
-	} else if (axis==1) {
+	} else if (vm==1) {
 		return{x:src.x*0.5, y:src.y, z:src.x*0.5};
 	}
 	//todo - use matrices!
@@ -541,9 +641,30 @@ function vchooseAxesInv(src,axis){
 
 function worldToScreen(view, rwpos){
 //	console.log(JSON.stringify(view));
-	var wpos={};
-	wpos=vchooseAxes(vsub(rwpos,view.interestPoint),view.axis);
-	return vadd(view.screenCentre,vscale(wpos,view.zoom));
+	if (view.viewMode==3){
+		// perspective view
+		// todo - combine into view-projection matrix.
+		var mat=m3x3Mul( m3x3RotY(view.angle.y), m3x3RotX(view.angle.x));
+		console.log("persp view"+JSON.stringify(mat));
+		var wpos = vsub(rwpos, view.interestPoint);
+		
+		var epos=m3x3MulVec(mat,wpos);
+		epos.z+=g_viewDist;
+		var screenDist=500.0;
+		//cx+kx/z, vy+ky/z
+		var f=screenDist / epos.z;
+		return {
+			x:view.screenCentre.x + epos.x*f,
+			y:view.screenCentre.y + epos.y*f,
+			z:f,	// todo - z scaling
+		};
+		
+	}else {
+		//2d/ortho views 
+		var wpos={};
+		wpos=vchooseAxes(vsub(rwpos,view.interestPoint),view.viewMode);
+		return vadd(view.screenCentre,vscale(wpos,view.zoom));
+	}
 //	return vscale(vadd(wpos,view.interestPoint),view.zoom);
 }
 function viewIs2d(vw){
@@ -555,7 +676,7 @@ function viewIs2d(vw){
 }
 function screenToWorld(view, rspos){
 	var spos={};
-	spos=vchooseAxesInv(vsub(rspos,view.screenCentre),view.axis);
+	spos=vchooseAxesInv(vsub(rspos,view.screenCentre),view.viewMode);
 
 	return vadd(view.interestPoint,vscale(spos,1.0/view.zoom));
 //	return vsub(vscale(spos,view.zoom),view.interestPoint);
@@ -585,10 +706,10 @@ function vctFillCircle(vct, pos,r) {
 }
 
 function Resize(){
-  editor.width=window.innerWidth;
-  editor.height=window.innerHeight;
-	g_width=editor.width;
-	g_height=editor.height;
+  editorCanvas.width=window.innerWidth;
+  editorCanvas.height=window.innerHeight;
+	g_width=editorCanvas.width;
+	g_height=editorCanvas.height;
 }
 
 function polyDiagonalHexFromRect(view,rc) {
@@ -812,14 +933,14 @@ function makeDefaultViewport(){
 	//todo - transform matrix.
 	// interim.. window bounds, centre,scale
 	return {
-		axis:2,
+		viewMode:2,
 		hasImage:true,
 		screenMin:{x:0, y:0, z:0},
 		screenSize:{x:g_width, y:g_height, z:0},
 		screenMax:{x:g_width, y:g_height, z:0},
 		screenCentre:vfromxyz(g_width*0.5, g_height*0.5, 0.0),
 		zoom:g_zoom,
-		interestPoint:g_viewCentre
+		interestPoint:g_interestPoint
 	}
 }
 function getViewport(spos){
@@ -1314,9 +1435,9 @@ function drawHrc(context,x,y,polys){
 }
 
 function getViewportList(){
-	if (g_viewMode==0){
+	if (g_viewLayoutMode==0){
 		return [makeDefaultViewport()];
-	} else if (g_viewMode==1){
+	} else if (g_viewLayoutMode==1){
 		//picture-in-picture zoom
 		var vps=[];
 		var vp=makeDefaultViewport();
@@ -1334,7 +1455,7 @@ function getViewportList(){
 		vps.push(vp);
 		return vps;
 	}
-	else{
+	else if (g_viewLayoutMode==2){
 		//var vp=makeDefaultViewport();
 		var sOfs=vfromxyz(g_width/4,g_height/4,0);
 		var smin=vfromxyz(0,0,0);
@@ -1347,8 +1468,8 @@ function getViewportList(){
 
 			var vpsub=makeDefaultViewport();
 
-			vpsub.axis=i;
-			vpsub.hasImage = (vpsub.axis==2)?true:false;
+			vpsub.viewMode=i;
+			vpsub.hasImage = (vpsub.viewMode==2)?true:false;
 
 			vpsub.screenSize=vfromxyz(smax.x/2, smax.y/2, 0);
 			vpsub.screenMin=vfromxyz(si*(smax.x/2), sj*(smax.y/2), 0);
@@ -1358,8 +1479,16 @@ function getViewportList(){
 			vps.push(vpsub);
 		}
 		return vps;
+	} else if (g_viewLayoutMode==3){
+		// one 3d view
+		var vp=makeDefaultViewport();
+		vp.interestPoint=g_interestPoint;
+		vp.angle=g_viewAngle;
+		vp.zoom=g_zoom;
+		vp.viewMode=3;
+		vp.hasImage=false;
+		return [vp];
 	}
-
 }
 var g_printPos=vzero();
 // debug print helpers.
@@ -1371,7 +1500,7 @@ function printAtInCtx(context,x,y,txt){
 }
 
 function printAt(x,y,txt){
-	printAtInCtx(editor.getContext("2d"),x,y,txt);
+	printAtInCtx(editorCanvas.getContext("2d"),x,y,txt);
 }
 function print(txt){
 	printAt(g_printPos.x,g_printPos.y,txt);
@@ -1482,16 +1611,27 @@ function ShowMaskedImages(){
 	window.open(url,"w2");
 	//document.getElementById("genImages").appendChild(g_myimg);
 }
-
+var g_random=0.0;
 function repaint(){
+	if (gl){
+		g_random+=0.1;a=g_random;
+       gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+		gl.clearColor(Math.cos(a)*0.5+0.5,0.0,Math.sin(a*1.17212)*0.5+0.5,1.0);
+		gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);	
+
+		return;
+	}
+
   var canvas = document.querySelector("canvas");
   var context = canvas.getContext("2d");
-  context.canvas.width  =window.innerWidth;
-  context.canvas.height =window.innerHeight;
+  canvas.width  =window.innerWidth;
+  canvas.height =window.innerHeight;
   var vps=getViewportList();
 	for (var i=0; i<vps.length; i++){
 		repaintView(context,vps[i]);
 	}
+
+	
 }
 function drawSelectedEdges(viewCtx){
 	var ctx=viewCtx.context;
@@ -1544,22 +1684,18 @@ function drawParentingSub(vct, polys, parentPos){
 	});
 }
 
-function repaintView(context,vp) {
-	context.save();
-	context.beginPath();
-	context.rect(vp.screenMin.x,vp.screenMin.y, vp.screenSize.x,vp.screenSize.y);
-	context.stroke();
-	context.clip();
+function drawBackgroundImage(vct) {
+	var vp=vct.view;
+	var context=vct.context;
   if (!g_img.ready) {
     
     context.font = "20px Arial";
     context.fillText("loading\n"+g_img.src,0,0);
-
-    return;
+	return;
   }
-	var vct={context:context,view:vp};
+	if (!g_img){return;}
 //draw backgrounda
-	context.globalAlpha=1.0;
+	vct.context.globalAlpha=1.0;
 	var img=g_img;
   //todo- transform and clip the image..
   var imgMin=vfromxyz(0,0,0);
@@ -1570,9 +1706,20 @@ function repaintView(context,vp) {
   context.fillStyle="#808080";
   context.clearRect(vp.screenMin.x, vp.screenMin.y, vp.screenSize.x, vp.screenSize.y);
   if (vp.hasImage){
-	  context.drawImage(img,0,0,img.width,img.height,
+	  vct.context.drawImage(img,0,0,img.width,img.height,
 		sImgMin.x,sImgMin.y, sSize.x, sSize.y);
 	}
+}
+
+function repaintView(context,vp) {
+	context.save();
+	context.beginPath();
+	context.rect(vp.screenMin.x,vp.screenMin.y, vp.screenSize.x,vp.screenSize.y);
+	context.stroke();
+	context.clip();
+
+	var vct={context:context,view:vp};
+	drawBackgroundImage(vct);
  // draw world axes..
    var vct={context:context,view:vp};
    context.globalAlpha=0.25;
@@ -1595,7 +1742,7 @@ function repaintView(context,vp) {
    // draw InterestPoint
    context.strokeStyle="#ffffff"
    context.globalAlpha=0.2;
-   vctDrawAxialCross(vct,g_viewCentre,20.0/vp.zoom);
+   vctDrawAxialCross(vct,g_interestPoint,20.0/vp.zoom);
 
   
   // show current tool feedback, unless it's pinch-zooming
@@ -1622,7 +1769,7 @@ function repaintView(context,vp) {
   {
 	context.globalAlpha=0.5;
 	context.fillStyle = "white";
-	context.fillText(g_axisName[vp.axis],vp.screenMin.x+15,vp.screenMin.y+15);
+	context.fillText(g_viewModeName[vp.viewMode],vp.screenMin.x+15,vp.screenMin.y+15);
   }
   drawStatusInfo(context);
   context.restore();
@@ -1759,7 +1906,7 @@ function ToggleCurrentPoly(dir){
 }
 
 function SetCursor(type){
-//	editor.style.cursor=type;//"url(crosshair.png), auto";
+//	editorCanvas.style.cursor=type;//"url(crosshair.png), auto";
 }
 // rectangular-drag creation tools -
 // several variations for different actual shapes
@@ -2008,6 +2155,23 @@ function makeDrawToolVariant(_name,drawFn,rclickfn){
 		}
 	};
 	return tool;
+}
+
+function TranslatePerpToView(vc, step){
+	// step is a SCREEN sized delta
+	vtc=GetSelectedVertices();
+	var tmppt;
+	if (!vtc.size){
+		var pt=pickPointAt(vc);
+		vtc.set(pt,true);
+	}
+	var worldDelta=screenDeltaToWorld(viewCursor(),vfromxyz(0.0,0.0,step));
+	console.log("translate "+vtc.size+" verts by "+JSON.stringify(worldDelta));
+	vtc.forEach(function(val,vt,map){
+		vaddto(vt,worldDelta);
+	});
+
+	if (tmppt){tag=false;}
 }
 
 function TranslateVerticesByDrag(fn){
@@ -2428,7 +2592,7 @@ function ExtrudeTaggedVertices(){
 }
 
 function screenDeltaToWorld(vc,ofs){
-	return vscale(vchooseAxesInv(ofs,vc.view.axis),1.0/vc.view.zoom);
+	return vscale(vchooseAxesInv(ofs,vc.view.viewMode),1.0/vc.view.zoom);
 }
 //todo - in perspective views, account for dist ..
 function screenDeltaToWorldAt(vc,screenDelta /*, atWorldPos*/){
@@ -2870,7 +3034,7 @@ function Save(){
 };
 
 // drag drop the annotation file in for load.
-editor.ondragover=function(ev){
+editorCanvas.ondragover=function(ev){
 //  console.log("dragover");
   ev.preventDefault();
 }
@@ -2895,7 +3059,7 @@ function GetDroppedUrlMaybe(dt){
 //  }
   return url;
 }
-editor.ondrop=function(ev){
+editorCanvas.ondrop=function(ev){
   console.log("got a drop");
   ev.preventDefault();
   var dt=ev.dataTransfer;
@@ -2938,7 +3102,7 @@ function Load(){
 };
 
 function readMousePos(e) {
-  var edrect = editor.getBoundingClientRect();
+  var edrect = editorCanvas.getBoundingClientRect();
 
   var opos=g_mousePos;
   console.assert(e.clientX && e.clientY);
@@ -2950,7 +3114,7 @@ function readMousePos(e) {
 var g_maxTouchFingers=0;
 var g_numFingers=0;
 function readTouchPos(e){
-	var edrect = editor.getBoundingClientRect();
+	var edrect = editorCanvas.getBoundingClientRect();
 	var opos=g_mousePos;
 	function readTouch(i){return vfromxy(e.touches[i].clientX-edrect.left,e.touches[i].clientY-edrect.top)};
 	g_numFingers=0;
@@ -2978,7 +3142,7 @@ function readTouchPos(e){
 }
 
 var g_multiTouchZoomFactor;
-editor.addEventListener('touchstart',function(e){
+editorCanvas.addEventListener('touchstart',function(e){
 	// we know it's an ipad.. need bigger tolerance
 	g_multiTouchZoomFactor=g_zoom;
 	g_snapRadius=22;
@@ -2990,7 +3154,7 @@ editor.addEventListener('touchstart',function(e){
 	e.preventDefault();
 	editorMouseDownSub(e);
 });
-editor.addEventListener('touchend',function(e){
+editorCanvas.addEventListener('touchend',function(e){
 	readTouchPos(e);
 	g_leftmousebutton=false;
 	e.preventDefault();
@@ -3000,7 +3164,7 @@ editor.addEventListener('touchend',function(e){
 	}
 );
 g_secondTouchPos;
-editor.addEventListener('touchmove',function(e){
+editorCanvas.addEventListener('touchmove',function(e){
 	readTouchPos(e);
 	e.preventDefault();
 	if (e.touches[1]){
@@ -3018,7 +3182,7 @@ function isMultiTouch(){ return g_maxTouchFingers>1;}
 function multiTouchNav(e){
 	var worldDelta=screenDeltaToWorld(viewCursor(),g_mouseScreenDelta);
 
-	vsubto(g_viewCentre,worldDelta);
+	vsubto(g_interestPoint,worldDelta);
 	printAt(100,100,"4"+JSON.stringify([g_mouseScreenDelta,g_secondTouchDelta]));
 	if (g_mouseScreenDelta && g_secondTouchDelta){
 		var fingerOfs=vsub(g_secondTouchPos,g_mousePos);
@@ -3053,13 +3217,17 @@ window.addEventListener('resize',function(e){
 	repaint();
 },true);
 
-editor.addEventListener('mousemove',function(e){readMousePos(e);editorMouseMoveSub(e)});
+editorCanvas.addEventListener('mousemove',function(e){readMousePos(e);editorMouseMoveSub(e)});
 function editorMouseMoveSub(e){
 	console.log("editormousemove "+g_ctrl+" "+g_multiSelectDrag);
 	if (isMultiSelect()){
 		multiSelectMouseMove(e);
 	}else {
 		if (g_leftmousebutton){
+			if (g_alt){	// alt or 3 finger drag is rotate?
+				g_viewAngle.y+= g_mouseScreenDelta.x/g_viewDist;
+				g_viewAngle.x+= g_mouseScreenDelta.y/g_viewDist;
+			} else
 			if (g_tool.mousedrag) {
 				g_tool.mousedrag(e);
 			}
@@ -3072,7 +3240,7 @@ function editorMouseMoveSub(e){
 	repaint();
 }
 
-editor.addEventListener("wheel", function(e){
+editorCanvas.addEventListener("wheel", function(e){
 	//console.log("mouse wheel event"+JSON.stringify(e)+e.deltaY);
 	var factor=1.0;
 	if (e.deltaY>0){ factor=1.08;
@@ -3639,16 +3807,18 @@ function SubdivideByVerticesSub(polys){
 	console.log("subdiv- done");
 	return newPolyList;
 }
-function ViewToggle(){
-	g_viewMode+=1;
-	if (g_viewMode==3){
-		g_viewMode=0;
+function ViewLayoutToggle(){
+	g_viewLayoutMode+=1;
+	// dont include perspective view in toggle order yet,
+	// it's not ready.
+	if (g_viewLayoutMode==3){
+		g_viewLayoutMode=0;
 	}
 }
 function isMultiSelect(){
 	return ((g_ctrl && g_ctrlIsMultiSelect)||g_multiSelectDrag);
 }
-editor.addEventListener('mousedown',function(e){readMousePos(e);editorMouseDownSub(e)});
+editorCanvas.addEventListener('mousedown',function(e){readMousePos(e);editorMouseDownSub(e)});
 
 function editorMouseDownSub(e){
 			console.log("editorMouseDown,button="+e.button);
@@ -3675,7 +3845,7 @@ function editorMouseDownSub(e){
 		repaint();
 	};
 g_dragLineDragging=false; // temp hack, fugly.
-editor.addEventListener('mouseup',
+editorCanvas.addEventListener('mouseup',
 	function(e){
 		g_leftmousebutton=false;
 		readMousePos(e);
@@ -3745,13 +3915,13 @@ function ViewFrameAll(){
 function ViewCentreSelection(){
 	var centre=GetSelectedVerticesCentroid();
 	if (centre){
-		g_viewCentre=centre;
+		g_interestPoint=centre;
 		repaint();
 	}
 	
 }
 
-editor.addEventListener('contextmenu',
+editorCanvas.addEventListener('contextmenu',
   function(e) {
 	e.preventDefault();
     if (g_tool.contextmenu){
@@ -3773,13 +3943,13 @@ editor.addEventListener('contextmenu',
 
 function ZoomByAt(vc, factor){
 	// todo: in 2d views, 'zoom at point'
-	var ofs=vsub(vc.worldpos, g_viewCentre);
-//	vaddto(g_viewCentre,ofs);
+	var ofs=vsub(vc.worldpos, g_interestPoint);
+//	vaddto(g_interestPoint,ofs);
 	g_zoom*=factor;
 
 //	console.log("vc="+JSON.stringify(vc));
 	if (viewIs2d(vc.view)){
-		vmaddto(g_viewCentre,ofs,-1+factor);
+		vmaddto(g_interestPoint,ofs,-1+factor);
 	}
 }
 function Cancel(){
@@ -3979,6 +4149,7 @@ g_uigroups=[
 //	{name:"adjust",info:"adjust polygons by moving vertices and splitting edges", onpress:mkset(g_adjustTool),sub:null},
 	{name:"draw",info:"primitive drawing tools",onpress:mkset(g_polyTool),
 		sub:[
+			{name:"adjust",onpress:mkset(g_adjustTool),sub:null},
 			{name:"points",onpress:mkset(g_pointTool)},
 			{name:"poly-line",onpress:mkset(g_polyLineTool)}, // default..
 			{name:"rect",onpress:mkset(g_rectTool)},
@@ -4055,8 +4226,9 @@ g_uigroups=[
 			{name:"show parenting",onpress:function(){g_show.parenting^=true}},
 			{name:"frame all",onpress:ViewFrameAll},
 			{name:"centre selected",onpress:ViewCentreSelection},
-			{name:"single view",onpress:function(){g_viewMode=0}},
-			{name:"3d view",onpress:function(){g_viewMode=2}}
+			{name:"XY view",onpress:function(){g_viewLayoutMode=0}},
+			{name:"4views",onpress:function(){g_viewLayoutMode=2}},
+			{name:"perspective",onpress:function(){alert("TODO");g_viewLayoutMode=3}},
 		]
 	}
 ];
@@ -4068,6 +4240,12 @@ for (var uigi=0; uigi<g_uigroups.length; uigi++){
 }
 
 uidone();
+
+function GetKeyboardStep(){
+	if (g_ctrl) {return 1.0;}
+	else if (g_shift) {return 20.0;}
+	else return 5.0;
+}
 
 window.addEventListener('keydown',  function(e){
   kc=e.keyCode;
@@ -4112,7 +4290,7 @@ window.addEventListener('keydown',  function(e){
   //c
   else if (kc==67){if (isCommandModifier(e)) {CopyToClipboard()}}
   //v
-  else if (kc==86){if (isCommandModifier(e)) {PasteFromClipboard()} else {ViewToggle();}}  
+  else if (kc==86){if (isCommandModifier(e)) {PasteFromClipboard()} else {ViewLayoutToggle();}}  
   //z
   else if (kc==90){if (g_ctrl){UndoBuffer_Restore();}}
 
@@ -4132,13 +4310,15 @@ window.addEventListener('keydown',  function(e){
 //  else if (kc==8){Delete();}
   else if (kc==187){ZoomByAt(viewCursor(),1.2);}
   else if (kc==189){ZoomByAt(viewCursor(),1.0/1.2);}
+  else if (kc==186){TranslatePerpToView(viewCursor(),-GetKeyboardStep());}
+  else if (kc==222){TranslatePerpToView(viewCursor(),GetKeyboardStep());}
 
   if (kc==70){console.log("pressed f");ViewFrameAll();}
 
   var step=g_ctrl?5.0:g_shift?40.0:20.0;
   var vp=getViewport(g_mousePos);
   var sdelta=vfromxyz(keyDelta(kc,37,39)*step,keyDelta(kc,38,40)*step, keyDelta(kc,33,34)*step);
-  vaddto(g_viewCentre,screenDeltaToWorld({cursor:g_mousePos,view:vp},sdelta));
+  vaddto(g_interestPoint,screenDeltaToWorld({cursor:g_mousePos,view:vp},sdelta));
 // todo .. parenting, renaming , delete vertex,...
   //readMousePos(e);
   repaint();
