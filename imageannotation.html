@@ -88,7 +88,6 @@ var g_allEdgeTags = new Map();
 var g_vertexVertexMap = new Map();
 var g_undoBuffer=[];
 var g_viewDist=500.0;
-var g_gl;
 // 'undo system': brute force document copy; only one-level
 // we can't just deep-copy though because of vertex references.
 
@@ -304,7 +303,7 @@ var g_selectionColor="red";
 var editorCanvas=document.getElementById("editorCanvas");
 var g_presetLabels=["object","person","vehicle","plant","animal","tree","building","machine","head","kerb","road marking","barrier","lamppost","bin","window","door","object1","object2","object3"];
 
-initGL(editorCanvas);
+//initGL(editorCanvas);
 var gl;
 function initGL(canvas){
 	gl=canvas.getContext("webgl2");
