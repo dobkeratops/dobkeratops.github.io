@@ -1,0 +1,37 @@
+canvas example
+<canvas id="myCanvas" width="800" height="800"></canvas>
+<script>
+function debug(x){/*	alert(JSON.stringify(x))*/};
+
+function vec3(x,y,z){return {x:x,y:y,z:z}}
+function vadd(a,b){return {x: a.x+b.x, y:a.y+b.y, z:a.z+b.z};}
+function vsub(a,b){return {x: a.x-b.x, y:a.y-b.y, z:a.z-b.z};}
+function vdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+function vscale(a,f){return {x:a.x*f,y:a.y*f, z:a.z*f}}
+function vmacc(a,b,f){return {x:a.x+b.x*f, y:a.y+b.y*f,z:a.z+b.z*f}}
+function vlerp(a,b,f){return vmacc(a,vsub(b,a),f);}
+function vcross(a,b){return {x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x};}
+function vnormalize(a){return vscale(a,1.0/sqrt(vdot(a,a)));}
+
+function drawLine(ctx,a,b){ ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();}
+
+function drawMesh(ctx,msh){
+	debug(msh);
+	for (i=0; i<msh.edges.length; i++) {
+		edge=msh.edges[i];
+		debug(edge);
+		drawLine(ctx,msh.vertices[edge.s],msh.vertices[edge.e]);
+	}
+}
+
+var c=document.getElementById("myCanvas");
+var ctx=c.getContext("2d");
+
+var msh={
+	vertices:[vec3(10,10,0),vec3(10,90,0),vec3(90,10,0), vec3(90,90,0)],
+	edges:[{s:0,e:1}, {s:2,e:3},{s:0,e:2},{s:1,e:3} ]
+	};
+
+drawMesh(ctx,msh);
+
+</script>
