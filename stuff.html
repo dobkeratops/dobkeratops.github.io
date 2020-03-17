@@ -9,6 +9,9 @@ function debug(x){	alert(JSON.stringify(x));};
 function vec3(x,y,z){return {x:x,y:y,z:z}}
 function vadd(a,b){return {x: a.x+b.x, y:a.y+b.y, z:a.z+b.z};}
 function vsub(a,b){return {x: a.x-b.x, y:a.y-b.y, z:a.z-b.z};}
+// just add 3 vectors together. a+b+c+d
+function vsum3(a,b,c){return vadd(vadd(a,b),c);}
+
 // just add 4 vectors together. a+b+c+d
 function vsum4(a,b,c,d){return vadd(vadd(a,b),vadd(c,d));}
 // dot product = cos(angle between a,b)*length(a)*length(b)
@@ -32,24 +35,69 @@ function drawLine(ctx,a,b){ ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke
 function drawMesh(ctx,msh,matrix){
 	// transform the vertices by the matrix 'm'
 	// the matrix could be rotation,translation, scaling or any combination
-	var transformedVertices=msh.vertices.map(v=>matMulVec3(matrix,v));
+	var transformedVertices=msh.vertices.map(v=>matrix43MulVec3w1(matrix,v));
 	// step through each edge and draw it by looking up its vertices
 	for (var i=0; i<msh.edges.length; i++) {
 		edge=msh.edges[i];
 		drawLine(ctx,transformedVertices[edge.s],transformedVertices[edge.e]);
 	}
 }
-// transform a vector 'v' by a 4x3 matrix 'm' - this can apply rotation,scaling,sheer,translation
-function matMulVec3(m,v){
+
+// construct a '4x3 matrix' - can describe 'affine transformations'
+// i.e. any combinatio of rotation,scaling,sheer,translation
+// '4x3' holds new basis vectors ax,ay,az, and new centre 'aw' (prefix 'a', 'w axis'.. the columns are labelled 'ax,ay,az,aw' in sequence)
+// sometimes i call the last element 'pos' but thats less general.
+// when you later move to 4x4 matrices ,
+// the 'w' components include information about perspective
+// i write 43 instead of 4x3 because its easier to type.
+// for 3d graphics matrices are small - 3x3, 4x3, 4x4. 
+// often people just use 4x4 padded with zeros.
+function matrix43(vx,vy,vz,vw){return {ax:vx,ay:vy,az:vz,aw:vw};}
+
+// transform a POINT vector 'v' by a 4x3 matrix 'm' - this can apply rotation,scaling,sheer,translation
+// this is matrix x vector multiplied, implemented by treating the matrix
+// as a collection of new basis vectors, to be scaled by the input vector and summed
+// to make the output vector.
+// for 4x3 matrices, the 'aw' is scaled by an implicit 1.0 , as if vec3 is actually
+// vec4(x,y,z,1.0) 
+// sometimes later we will use 4 element vectors , with 'w'=1.0 or 0.0 to distinguish points vs offsets
+function matrix43MulVec3w1(m,v){
 	return vsum4(	m.aw,
 			vscale(m.ax,v.x),
 			vscale(m.ay,v.y),
 			vscale(m.az,v.z));
 }
-function matrix4x3(vx,vy,vz,vw){return {ax:vx,ay:vy,az:vz,aw:vw};}
-function matrixRotateZ(ang){
+
+// transform an OFFSET vector by a 4x3 matrix, 
+// i.e. ignore the matrix' 'aw'(position,4th column) - i.e. 
+// treating this as vec4(x,y,z,0.0)
+// sometimes later we will use 4 element vectors , with 'w'=1.0 or 0.0 to distinguish points vs offsets
+function matrix43MulVec3w0(m,v){
+	return vsum3(	vscale(m.ax,v.x),
+			vscale(m.ay,v.y),
+			vscale(m.az,v.z));
+}
+// combine 2 4x3 transformation matrices - matrix mul matrix
+// implemented by tranforming the vector components of the matrix
+// the AXES are treated as (x,y,z,0). the POSITION (aw) is treated as (x,y,z,1)
+// i.e equiv to a 4x4 matrix padded out with (0,0,0,1) for the last row
+function matrix43MulMatrix43(first,second){
+	return matrix43(
+		matrix43MulVec3w0(first, second.ax),
+		matrix43MulVec3w0(first, second.ay),
+		matrix43MulVec3w0(first, second.az),
+		matrix43MulVec3w1(first, second.aw),
+		);
+}
+
+
+
+function matrix43RotateZ(ang){
 	var c=Math.cos(ang),s=Math.sin(ang);
-	return matrix4x3(vec3(c,s,0.0), vec3(-s,c,0.0), vec3(0.0,0.0,1.0), vec3(0.0,0.0,0.0));
+	return matrix43(vec3(c,s,0.0), vec3(-s,c,0.0), vec3(0.0,0.0,1.0), vec3(0.0,0.0,0.0));
+}
+function matrix43ScaleXYZ(sx,sy,sz){
+	return matrix43(vec3(sx,0.0,0.0), vec3(0.0,sy,0.0), vec3(0.0,0.0,sz), vec3(0.0,0.0,0.0));
 }
 
 var c=document.getElementById("myCanvas");
@@ -61,11 +109,16 @@ var msh={
 	edges:[{s:0,e:1}, {s:2,e:3},{s:0,e:2},{s:1,e:3} ]
 	};
 
-var m=matrixRotateZ(0.1);
-// draw the square at random rotations, positoins
+// draw the square at 10 random rotations,scalings & positoins..
 for (var i=0; i<10; i++) {
 	// make a random rotation matrix, 
-	var m=matrixRotateZ(Math.random()*6.248);
+	var mr=matrix43RotateZ(Math.random()*6.248);
+	// make a random scaling matrix,
+	// we use 'exp' to make more natural distribution of sizes 
+	var ms=matrix43ScaleXYZ(Math.random()*5.0,Math.random()*5.0,Math.random()*5.0);
+
+	// make a combined scaling,rotation by mutliply..
+	var m=matrix43MulMatrix43(mr,ms);
 	// add a translation to the matrix by overwriting 4th column, 'az'
 	// easier later to do this by combining matrices
 	m.aw=vec3(Math.random()*500.0,Math.random()*500.0,Math.random()*500.0);
