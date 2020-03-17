@@ -1,5 +1,5 @@
 canvas example
-<canvas id="myCanvas" width="800" height="800"></canvas>
+<canvas id="myCanvas" width="512" height="512"></canvas>
 <script>
 
 function debug(x){	alert(JSON.stringify(x));};
@@ -9,6 +9,8 @@ function debug(x){	alert(JSON.stringify(x));};
 function vec3(x,y,z){return {x:x,y:y,z:z}}
 function vadd(a,b){return {x: a.x+b.x, y:a.y+b.y, z:a.z+b.z};}
 function vsub(a,b){return {x: a.x-b.x, y:a.y-b.y, z:a.z-b.z};}
+// just add 4 vectors together. a+b+c+d
+function vsum4(a,b,c,d){return vadd(vadd(a,b),vadd(c,d));}
 // dot product = cos(angle between a,b)*length(a)*length(b)
 function vdot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 // scale a vector by a factor 'f'
@@ -27,13 +29,27 @@ function vnormalize(a){return vscale(a,1.0/sqrt(vdot(a,a)));}
 function drawLine(ctx,a,b){ ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();}
 
 // draw a wireframe mesh
-function drawMesh(ctx,msh){
-	debug(msh);
+function drawMesh(ctx,msh,matrix){
+	// transform the vertices by the matrix 'm'
+	// the matrix could be rotation,translation, scaling or any combination
+	var transformedVertices=msh.vertices.map(v=>matMulVec3(matrix,v));
 	// step through each edge and draw it by looking up its vertices
-	for (i=0; i<msh.edges.length; i++) {
+	for (var i=0; i<msh.edges.length; i++) {
 		edge=msh.edges[i];
-		drawLine(ctx,msh.vertices[edge.s],msh.vertices[edge.e]);
+		drawLine(ctx,transformedVertices[edge.s],transformedVertices[edge.e]);
 	}
+}
+// transform a vector 'v' by a 4x3 matrix 'm' - this can apply rotation,scaling,sheer,translation
+function matMulVec3(m,v){
+	return vsum4(	m.aw,
+			vscale(m.ax,v.x),
+			vscale(m.ay,v.y),
+			vscale(m.az,v.z));
+}
+function matrix4x3(vx,vy,vz,vw){return {ax:vx,ay:vy,az:vz,aw:vw};}
+function matrixRotateZ(ang){
+	var c=Math.cos(ang),s=Math.sin(ang);
+	return matrix4x3(vec3(c,s,0.0), vec3(-s,c,0.0), vec3(0.0,0.0,1.0), vec3(0.0,0.0,0.0));
 }
 
 var c=document.getElementById("myCanvas");
@@ -41,11 +57,20 @@ var ctx=c.getContext("2d");
 
 // create an example mesh , just a square
 var msh={
-	vertices:[vec3(10,10,0),vec3(10,90,0),vec3(90,10,0), vec3(90,90,0)],
+	vertices:[vec3(-10,-10,0),vec3(10,-10,0),vec3(-10,10,0), vec3(10,10,0)],
 	edges:[{s:0,e:1}, {s:2,e:3},{s:0,e:2},{s:1,e:3} ]
 	};
 
-// draw it
-drawMesh(ctx,msh);
+var m=matrixRotateZ(0.1);
+// draw the square at random rotations, positoins
+for (var i=0; i<10; i++) {
+	// make a random rotation matrix, 
+	var m=matrixRotateZ(Math.random()*6.248);
+	// add a translation to the matrix by overwriting 4th column, 'az'
+	// easier later to do this by combining matrices
+	m.aw=vec3(Math.random()*500.0,Math.random()*500.0,Math.random()*500.0);
+	// finally draw the square 'msh' at the place defined by the matrix 'm'
+	drawMesh(ctx,msh, m);
+}
 
 </script>
