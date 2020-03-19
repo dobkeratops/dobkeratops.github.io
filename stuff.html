@@ -54,6 +54,11 @@ function drawMesh(ctx,msh,matrix){
 // often people just use 4x4 padded with zeros.
 function matrix43(vx,vy,vz,vw){return {ax:vx,ay:vy,az:vz,aw:vw};}
 
+//make a matrix that does nothing, ("identity matrix")
+//i.e. multiplying any point or matrix by thie returns the same point or matrix.
+
+function matrix43Identity(){ return matrix43(vec3(1.0,0.0,0.0), vec3(0.0,1.0,0.0), vec3(0.0,0.0,1.0),vec3(0.0,0.0,0.0));}
+
 // transform a POINT vector 'v' by a 4x3 matrix 'm' - this can apply rotation,scaling,sheer,translation
 // this is matrix x vector multiplied, implemented by treating the matrix
 // as a collection of new basis vectors, to be scaled by the input vector and summed
@@ -81,7 +86,7 @@ function matrix43MulVec3w0(m,v){
 // implemented by tranforming the vector components of the matrix
 // the AXES are treated as (x,y,z,0). the POSITION (aw) is treated as (x,y,z,1)
 // i.e equiv to a 4x4 matrix padded out with (0,0,0,1) for the last row
-function matrix43MulMatrix43(first,second){
+function matrix43Mul(first,second){
 	return matrix43(
 		matrix43MulVec3w0(first, second.ax),
 		matrix43MulVec3w0(first, second.ay),
@@ -103,26 +108,54 @@ function matrix43ScaleXYZ(sx,sy,sz){
 var c=document.getElementById("myCanvas");
 var ctx=c.getContext("2d");
 
+
 // create an example mesh , just a square
-var msh={
-	vertices:[vec3(-10,-10,0),vec3(10,-10,0),vec3(-10,10,0), vec3(10,10,0)],
-	edges:[{s:0,e:1}, {s:2,e:3},{s:0,e:2},{s:1,e:3} ]
+function makeMeshRectXY(x0,y0,x1,y1){
+	return {
+		vertices:[vec3(x0,y0,0),vec3(x1,y0,0),vec3(x0,y1,0), vec3(x1,y1,0)],
+		edges:[{s:0,e:1}, {s:2,e:3},{s:0,e:2},{s:1,e:3} ]	
 	};
-
-// draw the square at 10 random rotations,scalings & positoins..
-for (var i=0; i<10; i++) {
-	// make a random rotation matrix, 
-	var mr=matrix43RotateZ(Math.random()*6.248);
-	// make a random scaling matrix,
-	var ms=matrix43ScaleXYZ(Math.random()*5.0,Math.random()*5.0,Math.random()*5.0);
-
-	// make a combined scaling,rotation by mutliply..
-	var m=matrix43MulMatrix43(mr,ms);
-	// add a translation to the matrix by overwriting 4th column, 'az'
-	// easier later to do this by combining matrices
-	m.aw=vec3(Math.random()*500.0,Math.random()*500.0,Math.random()*500.0);
-	// finally draw the square 'msh' at the place defined by the matrix 'm'
-	drawMesh(ctx,msh, m);
 }
+
+// create a test scene- several objects stored at different positions defined by matrices
+// each entry is pair - matrix and mesh reference.
+function makeTestScene(){
+// draw the square at 10 random rotations,scalings & positoins..
+	var squareMesh=makeMeshRectXY(-10,-10,10,10);
+	var objects=[];
+	
+	for (var i=0; i<10; i++) {
+		// make a random rotation matrix, 
+		var mr=matrix43RotateZ(Math.random()*6.248);
+		// make a random scaling matrix,
+		var ms=matrix43ScaleXYZ(Math.random()*5.0,Math.random()*5.0,Math.random()*5.0);
+
+		// make a combined scaling,rotation by mutliply..
+		var m=matrix43Mul(mr,ms);
+		// add a translation to the matrix by overwriting 4th column, 'az'
+		// easier later to do this by combining matrices
+		m.aw=vec3(Math.random()*500.0,Math.random()*500.0,Math.random()*500.0);
+		// finally draw the square 'msh' at the place defined by the matrix 'm'
+		objects.push({matrix:m, mesh:squareMesh});
+	}
+	return {objects:objects};
+}
+
+// draw a scene, using a matrix to transform the whole scene
+function drawScene(ctx,scene,matrix){
+	for (var i=0; i<scene.objects.length; i++){
+		obj=scene.objects[i];
+		var mtx=matrix43Mul(matrix, obj.matrix);
+		drawMesh(ctx,obj.mesh, mtx);
+	}
+}
+
+// draw the whole scene using the identity matrix,ie. show the objects at their original positions
+var canvas=document.getElementById("myCanvas");
+var ctx=canvas.getContext("2d");
+
+var scn=makeTestScene();
+drawScene(ctx,scn, matrix43Identity());
+
 
 </script>
