@@ -1,0 +1,3 @@
+conda install nodejs
+npm install -g inodejs
+npm install node-fetch
